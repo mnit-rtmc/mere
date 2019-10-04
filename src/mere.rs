@@ -2,7 +2,7 @@
 //
 // Copyright (C) 2018-2019  Minnesota Department of Transportation
 //
-use crate::error::Error;
+use crate::error::Result;
 use log::{debug, error, info};
 use ssh2::Session;
 use std::collections::HashSet;
@@ -28,9 +28,7 @@ impl PathSet {
     /// Wait to receive paths from channel.
     ///
     /// * `rx` Channel receiver for path names.
-    fn wait_receive(&mut self, rx: &Receiver<PathBuf>)
-        -> Result<(), Error>
-    {
+    fn wait_receive(&mut self, rx: &Receiver<PathBuf>) -> Result<()> {
         if self.set.is_empty() {
             debug!("waiting to receive paths");
             let p = rx.recv()?;
@@ -52,7 +50,7 @@ impl PathSet {
 /// Create a new SSH session
 ///
 /// * `host` Host name (and port) to connect.
-fn create_session(host: &str) -> Result<Session, Error> {
+fn create_session(host: &str) -> Result<Session> {
     debug!("creating session for {}", host);
     let mut session = Session::new()?;
     session.set_tcp_stream(TcpStream::connect(host)?);
@@ -64,7 +62,7 @@ fn create_session(host: &str) -> Result<Session, Error> {
 ///
 /// * `session` SSH session.
 /// * `username` User to authenticate.
-fn authenticate_session(session: &Session, username: &str) -> Result<(), Error>{
+fn authenticate_session(session: &Session, username: &str) -> Result<()> {
     debug!("authenticating user {}", username);
     // First, try using key with no pass-phrase.  If that doesn't work,
     // try using agent auth -- maybe we're running interactively
@@ -80,7 +78,7 @@ fn authenticate_session(session: &Session, username: &str) -> Result<(), Error>{
 ///
 /// * `session` SSH session.
 /// * `username` User to authenticate.
-fn authenticate_pubkey(session: &Session, username: &str) -> Result<(), Error> {
+fn authenticate_pubkey(session: &Session, username: &str) -> Result<()> {
     let mut key = PathBuf::new();
     key.push("/home");
     key.push(username);
@@ -95,7 +93,7 @@ fn authenticate_pubkey(session: &Session, username: &str) -> Result<(), Error> {
 ///
 /// * `session` SSH session.
 /// * `username` User to authenticate.
-fn authenticate_agent(session: &Session, username: &str) -> Result<(), Error> {
+fn authenticate_agent(session: &Session, username: &str) -> Result<()> {
     session.userauth_agent(username)?;
     debug!("authenticated {} using agent", username);
     Ok(())
@@ -107,7 +105,7 @@ fn authenticate_agent(session: &Session, username: &str) -> Result<(), Error> {
 /// * `rx` Channel receiver for path names.
 /// * `ps` Set of path names to mirror.
 fn mirror_from_channel(session: &Session, rx: &Receiver<PathBuf>,
-    mut ps: &mut PathSet) -> Result<(), Error>
+    mut ps: &mut PathSet) -> Result<()>
 {
     loop {
         ps.wait_receive(rx)?;
@@ -122,7 +120,7 @@ fn mirror_from_channel(session: &Session, rx: &Receiver<PathBuf>,
 ///
 /// * `session` SSH session.
 /// * `ps` Set of path names to mirror.
-fn mirror_all(session: &Session, ps: &mut PathSet) -> Result<(), Error> {
+fn mirror_all(session: &Session, ps: &mut PathSet) -> Result<()> {
     for p in ps.set.iter() {
         let t = Instant::now();
         match mirror_file(session, &p) {
@@ -142,7 +140,7 @@ fn mirror_all(session: &Session, ps: &mut PathSet) -> Result<(), Error> {
 ///
 /// * `session` SSH session.
 /// * `p` Path to file.
-fn mirror_file(session: &Session, p: &PathBuf) -> Result<&'static str, Error> {
+fn mirror_file(session: &Session, p: &PathBuf) -> Result<&'static str> {
     let fi = File::open(&p);
     match fi {
         Ok(f)  => scp_file(session, p, f),
@@ -155,7 +153,7 @@ fn mirror_file(session: &Session, p: &PathBuf) -> Result<&'static str, Error> {
 /// * `session` SSH session.
 /// * `p` Path to file.
 fn scp_file(session: &Session, p: &PathBuf, mut fi: File)
-    -> Result<&'static str, Error>
+    -> Result<&'static str>
 {
     let metadata = fi.metadata()?;
     let len = metadata.len();
@@ -177,7 +175,7 @@ fn scp_file(session: &Session, p: &PathBuf, mut fi: File)
 ///
 /// * `session` SSH session.
 /// * `p` Path to file.
-fn rm_file(session: &Session, p: &PathBuf) -> Result<&'static str, Error> {
+fn rm_file(session: &Session, p: &PathBuf) -> Result<&'static str> {
     debug!("removing {:?}", p);
     let mut channel = session.channel_session()?;
     let mut cmd = String::new();
@@ -195,7 +193,7 @@ fn rm_file(session: &Session, p: &PathBuf) -> Result<&'static str, Error> {
 /// * `rx` Channel receiver for path names.
 /// * `ps` Set of path names to mirror.
 fn start_session(host: &str, username: &str, rx: &Receiver<PathBuf>,
-    mut ps: &mut PathSet) -> Result<(), Error>
+    mut ps: &mut PathSet) -> Result<()>
 {
     match create_session(host) {
         Ok(session) => {
@@ -217,7 +215,7 @@ fn start_session(host: &str, username: &str, rx: &Receiver<PathBuf>,
 /// * `username` Name of user to use for authentication.
 /// * `rx` Channel receiver for path names.
 fn mirror_thread(host: &str, username: &str, rx: Receiver<PathBuf>)
-    -> Result<(), Error>
+    -> Result<()>
 {
     debug!("mirror thread started for {}", host);
     let mut ps = PathSet::new();
@@ -233,7 +231,7 @@ fn mirror_thread(host: &str, username: &str, rx: Receiver<PathBuf>)
 /// * `username` Name of user to use for authentication.
 /// * `rx` Channel receiver for path names.
 pub fn start_thread(host: &str, username: &str, rx: Receiver<PathBuf>)
-    -> JoinHandle<Result<(), Error>>
+    -> JoinHandle<Result<()>>
 {
     let host = host.to_string();
     let username = username.to_string();

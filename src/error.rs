@@ -8,6 +8,7 @@ use std::{fmt, io};
 use std::path::PathBuf;
 use std::sync::mpsc::{SendError, RecvError, TryRecvError};
 
+/// Error enum
 #[derive(Debug)]
 pub enum Error {
     Io(io::Error),
@@ -15,12 +16,25 @@ pub enum Error {
     MpscSend(SendError<PathBuf>),
     MpscRecv(RecvError),
     MpscTryRecv(TryRecvError),
+    InvalidArgs(),
+    ThreadPanicked(),
 }
+
+/// Custom Result
+pub type Result<T> = std::result::Result<T, Error>;
 
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let src = self.source().unwrap();
-        fmt::Display::fmt(src, f)
+        match self.source() {
+            Some(src) => fmt::Display::fmt(src, f),
+            None => {
+                match self {
+                    Error::InvalidArgs() => f.write_str("invlaid args"),
+                    Error::ThreadPanicked() => f.write_str("thread panicked"),
+                    _ => unreachable!(),
+                }
+            }
+        }
     }
 }
 
@@ -32,6 +46,7 @@ impl std::error::Error for Error {
             Error::MpscSend(e) => Some(e),
             Error::MpscRecv(e) => Some(e),
             Error::MpscTryRecv(e) => Some(e),
+            _ => None,
         }
     }
 }

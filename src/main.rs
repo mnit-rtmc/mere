@@ -14,13 +14,14 @@ mod error;
 mod mere;
 
 /// Main function
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::builder().format_timestamp(None).init();
     let args: Vec<String> = env::args().into_iter().collect();
     if args.len() > 2 {
-        mirror_files(&args[1], &args[2..]);
+        Ok(mirror_files(&args[1], &args[2..])?)
     } else {
         error!("Usage: {:} [host] [directory 0] … [directory N]", args[0]);
+        Err(Box::new(error::Error::InvalidArgs()))
     }
 }
 
@@ -28,7 +29,7 @@ fn main() {
 ///
 /// * `host` Destination host.
 /// * `directories` Slice of absolute directory names.
-fn mirror_files(host: &str, directories: &[String]) {
+fn mirror_files(host: &str, directories: &[String]) -> error::Result<()> {
     let username = whoami::username();
     info!("Mirroring to {:} as user {:}", host, username);
     for dir in directories {
@@ -43,8 +44,11 @@ fn mirror_files(host: &str, directories: &[String]) {
     n.push("test.txt");
     tx.send(n).unwrap();
     match join_handle.join() {
-        Ok(Ok(())) => (),
-        Ok(Err(e)) => error!("mere: {:?}", e),
-        Err(e) => error!("mere panic: {:?}", e),
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(e)) => Err(e),
+        Err(e) => {
+            error!("panicked: {:?}", e);
+            Err(error::Error::ThreadPanicked())
+        },
     }
 }
