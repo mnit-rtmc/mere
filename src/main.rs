@@ -14,9 +14,13 @@ use whoami;
 mod error;
 mod mere;
 
+/// Mere version from cargo manifest
+const VERSION: &'static str = env!("CARGO_PKG_VERSION");
+
 /// Main function
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::builder().format_timestamp(None).init();
+    info!("mere v{}", VERSION);
     let args: Vec<String> = env::args().into_iter().collect();
     if args.len() > 2 {
         Ok(mirror_files(&args[1], &args[2..])?)
