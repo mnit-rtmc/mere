@@ -42,7 +42,7 @@ fn mirror_files(host: &str, directories: &[String]) -> error::Result<()> {
     }
     let (tx, rx) = channel();
     let mut watcher: RecommendedWatcher = Watcher::new(tx,
-        Duration::from_secs(1))?;
+        Duration::from_millis(500))?;
     for dir in directories {
         watcher.watch(dir, RecursiveMode::NonRecursive)?;
     }
