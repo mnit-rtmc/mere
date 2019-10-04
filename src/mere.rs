@@ -66,13 +66,21 @@ impl PendingChanges {
     }
     /// Add a pending FileCopy change
     fn add_copy(&mut self, p: PathBuf) {
-        debug!("copy: {:?}", p);
-        self.changes.push_back(MirrorChange::FileCopy(p));
+        if check_path(&p) && check_file(&p) {
+            debug!("copy: {:?}", p);
+            self.changes.push_back(MirrorChange::FileCopy(p));
+        } else {
+            debug!("ignoring copy: {:?}", p);
+        }
     }
     /// Add a pending FileRemove change
     fn add_remove(&mut self, p: PathBuf) {
-        debug!("remove: {:?}", p);
-        self.changes.push_back(MirrorChange::FileRemove(p));
+        if check_path(&p) {
+            debug!("remove: {:?}", p);
+            self.changes.push_back(MirrorChange::FileRemove(p));
+        } else {
+            debug!("ignoring remove: {:?}", p);
+        }
     }
     /// Mirror all pending changes.
     ///
@@ -85,6 +93,45 @@ impl PendingChanges {
             }
         }
         Ok(())
+    }
+}
+
+/// Check if a path is valid
+fn check_path(p: &PathBuf) -> bool {
+    p.is_absolute() && !check_path_hidden(p) && !check_path_temp(p)
+}
+
+/// Check whether a file path is hidden
+fn check_path_hidden(p: &PathBuf) -> bool {
+    match p.file_name() {
+        Some(n) => {
+            match n.to_str() {
+                Some(sn) => sn.starts_with("."),
+                _ => true,
+            }
+        }
+        None => true,
+    }
+}
+
+/// Check whether a file path is temporary
+fn check_path_temp(p: &PathBuf) -> bool {
+    match p.extension() {
+        Some(e) => {
+            match e.to_str() {
+                Some(se) => se.ends_with("~"),
+                _ => true,
+            }
+        }
+        None => true,
+    }
+}
+
+/// Check if a file exists
+fn check_file(p: &PathBuf) -> bool {
+    match std::fs::metadata(p) {
+        Ok(metadata) => metadata.is_file() && metadata.len() > 0,
+        Err(_) => false,
     }
 }
 
