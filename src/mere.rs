@@ -1,47 +1,88 @@
-// mere.rs
+// mere.rs    Directory mirroring service
 //
 // Copyright (C) 2018-2019  Minnesota Department of Transportation
 //
 use crate::error::Result;
-use log::{debug, error, info};
+use crate::error::Error::MpscTryRecv;
+use log::{debug, error, info, trace};
+use notify::DebouncedEvent;
 use ssh2::Session;
-use std::collections::HashSet;
+use std::collections::VecDeque;
 use std::fs::File;
 use std::net::TcpStream;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, TryRecvError};
-use std::thread::{self, JoinHandle};
+use std::thread;
 use std::time::{Duration, Instant};
 
-/// A set of paths to mirror
-struct PathSet {
-    set : HashSet<PathBuf>,
+/// Mirror change
+#[derive(PartialEq, Eq, Hash)]
+enum MirrorChange {
+    FileCopy(PathBuf),
+    FileRemove(PathBuf),
 }
 
-impl PathSet {
-    /// Create a new PathSet
+/// Pending changes to mirror
+struct PendingChanges {
+    changes: VecDeque<MirrorChange>,
+}
+
+impl PendingChanges {
+    /// Create new pending changes
     fn new() -> Self {
-        let set = HashSet::new();
-        PathSet { set }
+        let changes = VecDeque::new();
+        PendingChanges { changes }
     }
     /// Wait to receive paths from channel.
     ///
     /// * `rx` Channel receiver for path names.
-    fn wait_receive(&mut self, rx: &Receiver<PathBuf>) -> Result<()> {
-        if self.set.is_empty() {
-            debug!("waiting to receive paths");
-            let p = rx.recv()?;
-            debug!("received path: {:?}", p);
-            self.set.insert(p);
+    fn wait_receive(&mut self, rx: &Receiver<DebouncedEvent>) -> Result<()> {
+        trace!("waiting to receive paths");
+        while self.changes.is_empty() {
+            self.add_change(rx.recv()?);
         }
         loop {
-            let p = rx.try_recv();
-            if let Err(TryRecvError::Empty) = p {
-                break;
-            };
-            debug!("received path: {:?}", p);
-            self.set.insert(p?);
+            match rx.try_recv() {
+                Err(TryRecvError::Empty) => break,
+                Err(e) => return Err(MpscTryRecv(e)),
+                Ok(event) => self.add_change(event),
+            }
+        }
+        Ok(())
+    }
+    /// Add a pending change
+    fn add_change(&mut self, event: DebouncedEvent) {
+        trace!("notify event: {:?}", event);
+        match event {
+            DebouncedEvent::Create(p) => self.add_copy(p),
+            DebouncedEvent::Remove(p) => self.add_remove(p),
+            DebouncedEvent::Rename(src, dst) => {
+                self.add_remove(src);
+                self.add_copy(dst);
+            },
+            e => trace!("ignored event: {:?}", e),
+        }
+    }
+    /// Add a pending FileCopy change
+    fn add_copy(&mut self, p: PathBuf) {
+        debug!("copy: {:?}", p);
+        self.changes.push_back(MirrorChange::FileCopy(p));
+    }
+    /// Add a pending FileRemove change
+    fn add_remove(&mut self, p: PathBuf) {
+        debug!("remove: {:?}", p);
+        self.changes.push_back(MirrorChange::FileRemove(p));
+    }
+    /// Mirror all pending changes.
+    ///
+    /// * `session` SSH session.
+    fn mirror_all(&mut self, session: &Session) -> Result<()> {
+        while let Some(c) = self.changes.pop_front() {
+            match c {
+                MirrorChange::FileCopy(p) => try_scp_file(session, &p)?,
+                MirrorChange::FileRemove(p) => try_rm_file(session, &p)?,
+            }
         }
         Ok(())
     }
@@ -103,62 +144,43 @@ fn authenticate_agent(session: &Session, username: &str) -> Result<()> {
 ///
 /// * `session` SSH session.
 /// * `rx` Channel receiver for path names.
-/// * `ps` Set of path names to mirror.
-fn mirror_from_channel(session: &Session, rx: &Receiver<PathBuf>,
-    mut ps: &mut PathSet) -> Result<()>
+/// * `pc` Set of pending changes to mirror.
+fn mirror_from_channel(session: &Session, rx: &Receiver<DebouncedEvent>,
+    pc: &mut PendingChanges) -> Result<()>
 {
     loop {
-        ps.wait_receive(rx)?;
-        if let Err(_) = mirror_all(session, &mut ps) {
+        pc.wait_receive(rx)?;
+        if let Err(_) = pc.mirror_all(session) {
             break;
         }
     }
     Ok(())
 }
 
-/// Mirror all files in a path set.
-///
-/// * `session` SSH session.
-/// * `ps` Set of path names to mirror.
-fn mirror_all(session: &Session, ps: &mut PathSet) -> Result<()> {
-    for p in ps.set.iter() {
-        let t = Instant::now();
-        match mirror_file(session, &p) {
-            Ok(action) => info!("{} {:?} in {:?}", action, p, t.elapsed()),
-            Err(e) => {
-                error!("{}, file {:?}", e, p);
-                return Err(e);
-            },
-        }
-    }
-    // All copied successfully
-    ps.set.clear();
-    Ok(())
-}
-
-/// Mirror one file.
+/// Try to scp a file
 ///
 /// * `session` SSH session.
 /// * `p` Path to file.
-fn mirror_file(session: &Session, p: &PathBuf) -> Result<&'static str> {
-    let fi = File::open(&p);
-    match fi {
-        Ok(f)  => scp_file(session, p, f),
-        Err(_) => rm_file(session, p),
+fn try_scp_file(session: &Session, p: &PathBuf) -> Result<()> {
+    let t = Instant::now();
+    let r = scp_file(session, &p);
+    match &r {
+        Ok(_) => info!("copied {:?} in {:?}", p, t.elapsed()),
+        Err(e) => error!("{}, copying {:?}", e, p),
     }
+    r
 }
 
 /// Mirror one file with scp.
 ///
 /// * `session` SSH session.
 /// * `p` Path to file.
-fn scp_file(session: &Session, p: &PathBuf, mut fi: File)
-    -> Result<&'static str>
-{
+fn scp_file(session: &Session, p: &PathBuf) -> Result<()> {
+    let mut fi = File::open(&p)?;
     let metadata = fi.metadata()?;
     let len = metadata.len();
     // Mask off higher mode bits to prevent scp_send
-    // from returning a [-28] "file corrupt" error
+    // from returning a "file corrupt" error
     let mode = (metadata.permissions().mode() & 0o7777) as i32;
     debug!("copying {:?} with len: {} and mode {:o}", p, len, mode);
     let mut fo = session.scp_send(p.as_path(), mode, len, None)?;
@@ -168,14 +190,28 @@ fn scp_file(session: &Session, p: &PathBuf, mut fi: File)
     } else {
         error!("{:?}: length mismatch {} != {}", p, c, len);
     }
-    Ok("copied")
+    Ok(())
+}
+
+/// Try to remove one file.
+///
+/// * `session` SSH session.
+/// * `p` Path to file.
+fn try_rm_file(session: &Session, p: &PathBuf) -> Result<()> {
+    let t = Instant::now();
+    let r = rm_file(session, &p);
+    match &r {
+        Ok(_) => info!("removed {:?} in {:?}", p, t.elapsed()),
+        Err(e) => error!("{}, removing {:?}", e, p),
+    }
+    r
 }
 
 /// Remove one file.
 ///
 /// * `session` SSH session.
 /// * `p` Path to file.
-fn rm_file(session: &Session, p: &PathBuf) -> Result<&'static str> {
+fn rm_file(session: &Session, p: &PathBuf) -> Result<()> {
     debug!("removing {:?}", p);
     let mut channel = session.channel_session()?;
     let mut cmd = String::new();
@@ -183,7 +219,7 @@ fn rm_file(session: &Session, p: &PathBuf) -> Result<&'static str> {
     cmd.push_str(p.to_str().unwrap());
     channel.exec(&cmd)?;
     debug!("removed {:?}", p);
-    Ok("removed")
+    Ok(())
 }
 
 /// Start mirror session.
@@ -191,14 +227,14 @@ fn rm_file(session: &Session, p: &PathBuf) -> Result<&'static str> {
 /// * `host` Host name (and port) to connect.
 /// * `username` Name of user to use for authentication.
 /// * `rx` Channel receiver for path names.
-/// * `ps` Set of path names to mirror.
-fn start_session(host: &str, username: &str, rx: &Receiver<PathBuf>,
-    mut ps: &mut PathSet) -> Result<()>
+/// * `pc` Set of pending changes to mirror.
+fn start_session(host: &str, username: &str, rx: &Receiver<DebouncedEvent>,
+    mut pc: &mut PendingChanges) -> Result<()>
 {
     match create_session(host) {
         Ok(session) => {
             authenticate_session(&session, username)?;
-            mirror_from_channel(&session, rx, &mut ps)?;
+            mirror_from_channel(&session, rx, &mut pc)?;
         },
         Err(e) => {
             error!("{}, host: {}", e, host);
@@ -209,31 +245,18 @@ fn start_session(host: &str, username: &str, rx: &Receiver<PathBuf>,
     Ok(())
 }
 
-/// Mirror thread entry point.
+/// Mirror files received from channel.
 ///
 /// * `host` Host name (and port) to connect.
 /// * `username` Name of user to use for authentication.
 /// * `rx` Channel receiver for path names.
-fn mirror_thread(host: &str, username: &str, rx: Receiver<PathBuf>)
+pub fn mirror_files(host: &str, username: &str, rx: Receiver<DebouncedEvent>)
     -> Result<()>
 {
-    debug!("mirror thread started for {}", host);
-    let mut ps = PathSet::new();
+    debug!("mirroring started for {}", host);
+    let mut pc = PendingChanges::new();
     loop {
-        ps.wait_receive(&rx)?;
-        start_session(&host, username, &rx, &mut ps)?;
+        pc.wait_receive(&rx)?;
+        start_session(&host, username, &rx, &mut pc)?;
     }
-}
-
-/// Start mirroring thread.
-///
-/// * `host` Host name (and port) to connect.
-/// * `username` Name of user to use for authentication.
-/// * `rx` Channel receiver for path names.
-pub fn start_thread(host: &str, username: &str, rx: Receiver<PathBuf>)
-    -> JoinHandle<Result<()>>
-{
-    let host = host.to_string();
-    let username = username.to_string();
-    thread::spawn(move || { mirror_thread(&host, &username, rx) })
 }

@@ -1,13 +1,14 @@
-// mere.rs
+// main.rs    Directory mirroring service
 //
 // Copyright (C)  2018-2019  Minnesota Department of Transportation
 //
 #![forbid(unsafe_code)]
 
 use log::{error, info};
+use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use std::env;
-use std::path::PathBuf;
-use std::sync::mpsc::{channel, Sender};
+use std::sync::mpsc::channel;
+use std::time::Duration;
 use whoami;
 
 mod error;
@@ -36,19 +37,10 @@ fn mirror_files(host: &str, directories: &[String]) -> error::Result<()> {
         info!("  Directory {:}", dir);
     }
     let (tx, rx) = channel();
-    let join_handle = mere::start_thread(&host, &username, rx);
-    // FIXME: use fsnotifier to send paths to channel
-    let mut n = PathBuf::new();
-    n.push("/home");
-    n.push(username);
-    n.push("test.txt");
-    tx.send(n).unwrap();
-    match join_handle.join() {
-        Ok(Ok(())) => Ok(()),
-        Ok(Err(e)) => Err(e),
-        Err(e) => {
-            error!("panicked: {:?}", e);
-            Err(error::Error::ThreadPanicked())
-        },
+    let mut watcher: RecommendedWatcher = Watcher::new(tx,
+        Duration::from_secs(1))?;
+    for dir in directories {
+        watcher.watch(dir, RecursiveMode::NonRecursive)?;
     }
+    mere::mirror_files(&host, &username, rx)
 }

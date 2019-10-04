@@ -1,4 +1,4 @@
-// error.rs
+// error.rs    Directory mirroring service
 //
 // Copyright (c) 2019  Minnesota Department of Transportation
 //
@@ -12,12 +12,12 @@ use std::sync::mpsc::{SendError, RecvError, TryRecvError};
 #[derive(Debug)]
 pub enum Error {
     Io(io::Error),
-    Ssh(ssh2::Error),
     MpscSend(SendError<PathBuf>),
     MpscRecv(RecvError),
     MpscTryRecv(TryRecvError),
+    Notify(notify::Error),
+    Ssh(ssh2::Error),
     InvalidArgs(),
-    ThreadPanicked(),
 }
 
 /// Custom Result
@@ -30,7 +30,6 @@ impl fmt::Display for Error {
             None => {
                 match self {
                     Error::InvalidArgs() => f.write_str("invlaid args"),
-                    Error::ThreadPanicked() => f.write_str("thread panicked"),
                     _ => unreachable!(),
                 }
             }
@@ -42,10 +41,11 @@ impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Error::Io(e) => Some(e),
-            Error::Ssh(e) => Some(e),
             Error::MpscSend(e) => Some(e),
             Error::MpscRecv(e) => Some(e),
             Error::MpscTryRecv(e) => Some(e),
+            Error::Notify(e) => Some(e),
+            Error::Ssh(e) => Some(e),
             _ => None,
         }
     }
@@ -54,6 +54,12 @@ impl std::error::Error for Error {
 impl From<io::Error> for Error {
     fn from(e: io::Error) -> Self {
         Error::Io(e)
+    }
+}
+
+impl From<notify::Error> for Error {
+    fn from(e: notify::Error) -> Self {
+        Error::Notify(e)
     }
 }
 
