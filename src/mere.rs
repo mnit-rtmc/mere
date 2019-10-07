@@ -123,7 +123,7 @@ fn check_path_temp(p: &PathBuf) -> bool {
                 _ => true,
             }
         }
-        None => true,
+        None => false,
     }
 }
 

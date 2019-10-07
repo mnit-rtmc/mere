@@ -1,6 +1,6 @@
 [package]
 name = "mere"
-version = "0.1.1"
+version = "0.1.2"
 authors = ["Douglas Lau <doug.lau@state.mn.us>"]
 description = "A low-latency directory mirroring service"
 license = "MIT OR Apache-2.0"
