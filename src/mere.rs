@@ -2,94 +2,138 @@
 //
 // Copyright (C) 2018-2019  Minnesota Department of Transportation
 //
-use crate::error::Result;
-use crate::error::Error::MpscTryRecv;
+use crate::error::{Result, Error::ScpLength};
+use inotify::{Event, EventMask, Inotify, WatchDescriptor, WatchMask};
 use log::{debug, error, info, trace};
-use notify::DebouncedEvent;
 use ssh2::Session;
-use std::collections::VecDeque;
+use std::collections::{HashMap, HashSet};
+use std::ffi::OsStr;
 use std::fs::File;
 use std::net::TcpStream;
 use std::os::unix::fs::PermissionsExt;
-use std::path::PathBuf;
-use std::sync::mpsc::{Receiver, TryRecvError};
+use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, Instant};
 
-/// Mirror change
-#[derive(PartialEq, Eq, Hash)]
-enum MirrorChange {
-    FileCopy(PathBuf),
-    FileRemove(PathBuf),
-}
-
 /// Pending changes to mirror
 struct PendingChanges {
-    changes: VecDeque<MirrorChange>,
+    /// Mirror destination host:port
+    host: String,
+    /// Inotify watches
+    inotify: Inotify,
+    /// Map of watch descriptors to paths
+    dirs: HashMap<WatchDescriptor, PathBuf>,
+    /// Set of pending changes
+    changes: HashSet<PathBuf>,
+}
+
+/// Get the inotify watch mask
+fn watch_mask() -> WatchMask {
+    let mut mask = WatchMask::CLOSE_WRITE;
+    mask.insert(WatchMask::DELETE);
+    mask.insert(WatchMask::MOVE);
+    mask
 }
 
 impl PendingChanges {
     /// Create new pending changes
-    fn new() -> Self {
-        let changes = VecDeque::new();
-        PendingChanges { changes }
-    }
-    /// Wait to receive paths from channel.
     ///
-    /// * `rx` Channel receiver for path names.
-    fn wait_receive(&mut self, rx: &Receiver<DebouncedEvent>) -> Result<()> {
-        trace!("waiting to receive paths");
-        while self.changes.is_empty() {
-            self.add_change(rx.recv()?);
+    /// * `host` Host name (and port) to connect.
+    /// * `directories` Slice of directories.
+    fn new(host: &str, directories: &[String]) -> Result<Self> {
+        let host = host.to_string();
+        let mut inotify = Inotify::init()?;
+        let changes = HashSet::new();
+        let mask = watch_mask();
+        let mut dirs = HashMap::new();
+        for dir in directories {
+            info!("  Directory {:}", dir);
+            let wd = inotify.add_watch(dir, mask)?;
+            dirs.insert(wd, dir.into());
         }
-        loop {
-            match rx.try_recv() {
-                Err(TryRecvError::Empty) => break,
-                Err(e) => return Err(MpscTryRecv(e)),
-                Ok(event) => self.add_change(event),
+        Ok(PendingChanges { host, inotify, dirs, changes })
+    }
+    /// Wait for watch events.
+    fn wait_events(&mut self) -> Result<()> {
+        trace!("waiting for watch events");
+        let mut buffer = [0; 1024];
+        while self.changes.is_empty() {
+            let events = self.inotify.read_events_blocking(&mut buffer)?;
+            for event in events {
+                self.add_change(event);
             }
         }
         Ok(())
     }
     /// Add a pending change
-    fn add_change(&mut self, event: DebouncedEvent) {
+    fn add_change(&mut self, event: Event<&OsStr>) {
         trace!("notify event: {:?}", event);
-        match event {
-            DebouncedEvent::Create(p) => self.add_copy(p),
-            DebouncedEvent::Remove(p) => self.add_remove(p),
-            DebouncedEvent::Rename(src, dst) => {
-                self.add_remove(src);
-                self.add_copy(dst);
+        let dir = self.dirs.get(&event.wd);
+        match (dir, event.name) {
+            (Some(dir), Some(p)) => {
+                if event.mask.contains(EventMask::CREATE) ||
+                   event.mask.contains(EventMask::CLOSE_WRITE) ||
+                   event.mask.contains(EventMask::DELETE) ||
+                   event.mask.contains(EventMask::MOVED_FROM) ||
+                   event.mask.contains(EventMask::MOVED_TO)
+                {
+                    let mut pb = dir.clone();
+                    pb.push(p);
+                    self.add_path(pb);
+                } else {
+                    trace!("ignored event: {:?}", event);
+                }
+            }
+            _ => trace!("ignored event: {:?}", event),
+        }
+    }
+    /// Add a pending PathBuf change
+    fn add_path(&mut self, p: PathBuf) {
+        if check_path(p.as_ref()) {
+            debug!("adding path: {:?}", p);
+            self.changes.insert(p);
+        } else {
+            debug!("ignoring path: {:?}", p);
+        }
+    }
+    /// Handle an SSH session.
+    ///
+    /// * `username` Name of user to use for authentication.
+    fn handle_session(&mut self, username: &str) -> Result<()> {
+        match create_session(&self.host) {
+            Ok(session) => {
+                authenticate_session(&session, username)?;
+                self.mirror_session(&session)?;
             },
-            e => trace!("ignored event: {:?}", e),
+            Err(e) => {
+                error!("{}, host: {}", e, self.host);
+                debug!("waiting for 10 seconds to try again");
+                thread::sleep(Duration::from_secs(10));
+            },
         }
+        Ok(())
     }
-    /// Add a pending FileCopy change
-    fn add_copy(&mut self, p: PathBuf) {
-        if check_path(&p) && check_file(&p) {
-            debug!("copy: {:?}", p);
-            self.changes.push_back(MirrorChange::FileCopy(p));
-        } else {
-            debug!("ignoring copy: {:?}", p);
-        }
-    }
-    /// Add a pending FileRemove change
-    fn add_remove(&mut self, p: PathBuf) {
-        if check_path(&p) {
-            debug!("remove: {:?}", p);
-            self.changes.push_back(MirrorChange::FileRemove(p));
-        } else {
-            debug!("ignoring remove: {:?}", p);
-        }
-    }
-    /// Mirror all pending changes.
+    /// Mirror files for one session.
     ///
     /// * `session` SSH session.
-    fn mirror_all(&mut self, session: &Session) -> Result<()> {
-        while let Some(c) = self.changes.pop_front() {
-            match c {
-                MirrorChange::FileCopy(p) => try_scp_file(session, &p)?,
-                MirrorChange::FileRemove(p) => try_rm_file(session, &p)?,
+    fn mirror_session(&mut self, session: &Session) -> Result<()> {
+        loop {
+            self.wait_events()?;
+            if let Err(_) = self.mirror_pending(session) {
+                break;
+            }
+        }
+        Ok(())
+    }
+    /// Mirror pending changes.
+    ///
+    /// * `session` SSH session.
+    fn mirror_pending(&mut self, session: &Session) -> Result<()> {
+        for p in self.changes.drain() {
+            if check_file(p.as_ref()) {
+                try_scp_file(session, &p)?;
+            } else {
+                try_rm_file(session, &p)?;
             }
         }
         Ok(())
@@ -97,12 +141,12 @@ impl PendingChanges {
 }
 
 /// Check if a path is valid
-fn check_path(p: &PathBuf) -> bool {
+fn check_path(p: &Path) -> bool {
     p.is_absolute() && !check_path_hidden(p) && !check_path_temp(p)
 }
 
 /// Check whether a file path is hidden
-fn check_path_hidden(p: &PathBuf) -> bool {
+fn check_path_hidden(p: &Path) -> bool {
     match p.file_name() {
         Some(n) => {
             match n.to_str() {
@@ -115,7 +159,7 @@ fn check_path_hidden(p: &PathBuf) -> bool {
 }
 
 /// Check whether a file path is temporary
-fn check_path_temp(p: &PathBuf) -> bool {
+fn check_path_temp(p: &Path) -> bool {
     match p.extension() {
         Some(e) => {
             match e.to_str() {
@@ -128,7 +172,7 @@ fn check_path_temp(p: &PathBuf) -> bool {
 }
 
 /// Check if a file exists
-fn check_file(p: &PathBuf) -> bool {
+fn check_file(p: &Path) -> bool {
     match std::fs::metadata(p) {
         Ok(metadata) => metadata.is_file() && metadata.len() > 0,
         Err(_) => false,
@@ -187,23 +231,6 @@ fn authenticate_agent(session: &Session, username: &str) -> Result<()> {
     Ok(())
 }
 
-/// Mirror files received from channel.
-///
-/// * `session` SSH session.
-/// * `rx` Channel receiver for path names.
-/// * `pc` Set of pending changes to mirror.
-fn mirror_from_channel(session: &Session, rx: &Receiver<DebouncedEvent>,
-    pc: &mut PendingChanges) -> Result<()>
-{
-    loop {
-        pc.wait_receive(rx)?;
-        if let Err(_) = pc.mirror_all(session) {
-            break;
-        }
-    }
-    Ok(())
-}
-
 /// Try to scp a file
 ///
 /// * `session` SSH session.
@@ -234,10 +261,11 @@ fn scp_file(session: &Session, p: &PathBuf) -> Result<()> {
     let c = std::io::copy(&mut fi, &mut fo)?;
     if c == len {
         debug!("copied {:?}", p);
+        Ok(())
     } else {
         error!("{:?}: length mismatch {} != {}", p, c, len);
+        Err(ScpLength())
     }
-    Ok(())
 }
 
 /// Try to remove one file.
@@ -269,41 +297,16 @@ fn rm_file(session: &Session, p: &PathBuf) -> Result<()> {
     Ok(())
 }
 
-/// Start mirror session.
+/// Mirror files to another host.
 ///
-/// * `host` Host name (and port) to connect.
-/// * `username` Name of user to use for authentication.
-/// * `rx` Channel receiver for path names.
-/// * `pc` Set of pending changes to mirror.
-fn start_session(host: &str, username: &str, rx: &Receiver<DebouncedEvent>,
-    mut pc: &mut PendingChanges) -> Result<()>
-{
-    match create_session(host) {
-        Ok(session) => {
-            authenticate_session(&session, username)?;
-            mirror_from_channel(&session, rx, &mut pc)?;
-        },
-        Err(e) => {
-            error!("{}, host: {}", e, host);
-            debug!("waiting for 10 seconds to try again");
-            thread::sleep(Duration::from_secs(10));
-        },
-    }
-    Ok(())
-}
-
-/// Mirror files received from channel.
-///
-/// * `host` Host name (and port) to connect.
-/// * `username` Name of user to use for authentication.
-/// * `rx` Channel receiver for path names.
-pub fn mirror_files(host: &str, username: &str, rx: Receiver<DebouncedEvent>)
-    -> Result<()>
-{
-    debug!("mirroring started for {}", host);
-    let mut pc = PendingChanges::new();
+/// * `host` Destination host.
+/// * `directories` Slice of absolute directory names.
+pub fn mirror_files(host: &str, directories: &[String]) -> Result<()> {
+    let username = whoami::username();
+    info!("Mirroring to {:} as user {:}", host, username);
+    let mut pc = PendingChanges::new(host, directories)?;
     loop {
-        pc.wait_receive(&rx)?;
-        start_session(&host, username, &rx, &mut pc)?;
+        pc.wait_events()?;
+        pc.handle_session(&username)?;
     }
 }
