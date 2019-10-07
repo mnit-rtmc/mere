@@ -11,7 +11,7 @@ pub enum Error {
     Io(io::Error),
     Ssh(ssh2::Error),
     InvalidArgs(),
-    ScpLength(),
+    ScpLength(u64, u64),
 }
 
 /// Custom Result
@@ -24,7 +24,9 @@ impl fmt::Display for Error {
             None => {
                 match self {
                     Error::InvalidArgs() => f.write_str("invlaid args"),
-                    Error::ScpLength() => f.write_str("scp length"),
+                    Error::ScpLength(u0, u1) => {
+                        f.write_fmt(format_args!("scp length: {} != {}", u0, u1))
+                    },
                     _ => unreachable!(),
                 }
             }

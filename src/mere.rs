@@ -53,7 +53,7 @@ impl PendingChanges {
         }
         Ok(PendingChanges { host, inotify, dirs, changes })
     }
-    /// Wait for watch events.
+    /// Wait for watch events
     fn wait_events(&mut self) -> Result<()> {
         trace!("waiting for watch events");
         let mut buffer = [0; 1024];
@@ -63,10 +63,26 @@ impl PendingChanges {
                 self.add_change(event);
             }
         }
+        // Check for more events until there are none
+        loop {
+            thread::sleep(Duration::from_millis(50));
+            if !self.check_more_events(&mut buffer)? {
+                break;
+            }
+        }
         Ok(())
     }
+    /// Check for more watch events
+    fn check_more_events(&mut self, mut buffer: &mut [u8]) -> Result<bool> {
+        let mut more = false;
+        let events = self.inotify.read_events(&mut buffer)?;
+        for event in events {
+            more |= self.add_change(event);
+        }
+        Ok(more)
+    }
     /// Add a pending change
-    fn add_change(&mut self, event: Event<&OsStr>) {
+    fn add_change(&mut self, event: Event<&OsStr>) -> bool {
         trace!("notify event: {:?}", event);
         let dir = self.dirs.get(&event.wd);
         match (dir, event.name) {
@@ -80,12 +96,13 @@ impl PendingChanges {
                     let mut pb = dir.clone();
                     pb.push(p);
                     self.add_path(pb);
-                } else {
-                    trace!("ignored event: {:?}", event);
+                    return true;
                 }
             }
-            _ => trace!("ignored event: {:?}", event),
+            _ => (),
         }
+        trace!("ignored event: {:?}", event);
+        false
     }
     /// Add a pending PathBuf change
     fn add_path(&mut self, p: PathBuf) {
@@ -150,12 +167,20 @@ fn check_path_hidden(p: &Path) -> bool {
     match p.file_name() {
         Some(n) => {
             match n.to_str() {
-                Some(sn) => sn.starts_with("."),
+                Some(sn) => check_hidden(sn),
                 _ => true,
             }
         }
         None => true,
     }
+}
+
+/// For some reason, vim creates temporary files called 4913
+const VIM_TEMP: &str = "4913";
+
+/// Check whether a file name is hidden
+fn check_hidden(sn: &str) -> bool {
+    sn.starts_with(".") || sn == VIM_TEMP
 }
 
 /// Check whether a file path is temporary
@@ -174,7 +199,7 @@ fn check_path_temp(p: &Path) -> bool {
 /// Check if a file exists
 fn check_file(p: &Path) -> bool {
     match std::fs::metadata(p) {
-        Ok(metadata) => metadata.is_file() && metadata.len() > 0,
+        Ok(metadata) => metadata.is_file(),
         Err(_) => false,
     }
 }
@@ -260,11 +285,9 @@ fn scp_file(session: &Session, p: &PathBuf) -> Result<()> {
     let mut fo = session.scp_send(p.as_path(), mode, len, None)?;
     let c = std::io::copy(&mut fi, &mut fo)?;
     if c == len {
-        debug!("copied {:?}", p);
         Ok(())
     } else {
-        error!("{:?}: length mismatch {} != {}", p, c, len);
-        Err(ScpLength())
+        Err(ScpLength(c, len))
     }
 }
 
@@ -293,7 +316,6 @@ fn rm_file(session: &Session, p: &PathBuf) -> Result<()> {
     cmd.push_str("rm -f ");
     cmd.push_str(p.to_str().unwrap());
     channel.exec(&cmd)?;
-    debug!("removed {:?}", p);
     Ok(())
 }
 
