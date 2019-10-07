@@ -1,6 +1,6 @@
 [package]
 name = "mere"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Douglas Lau <doug.lau@state.mn.us>"]
 description = "A low-latency directory mirroring service"
 license = "MIT OR Apache-2.0"
@@ -10,8 +10,15 @@ readme = "README.md"
 edition = "2018"
 
 [dependencies]
-env_logger = "0.7.0"
 log = "0.4.8"
 notify = "4.0.13"
-ssh2 = { version = "0.4.0", features = ["vendored-openssl"] }
 whoami = "0.5.3"
+
+[dependencies.ssh2]
+version = "0.4.0"
+features = ["vendored-openssl"]
+
+[dependencies.env_logger]
+version = "0.7.0"
+default_features = false
+features = ["atty", "humantime"]
