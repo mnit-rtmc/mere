@@ -1,5 +1,7 @@
 # Mere
 
+![Mere](mere.svg)
+
 *Mere* is a low-latency directory mirroring service using ssh.
 
 ## Build
