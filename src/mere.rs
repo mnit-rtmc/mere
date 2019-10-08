@@ -3,7 +3,7 @@
 // Copyright (C) 2018-2019  Minnesota Department of Transportation
 //
 use crate::error::{Result, Error::ScpLength};
-use inotify::{Event, EventMask, Inotify, WatchDescriptor, WatchMask};
+use inotify::{Event, Inotify, WatchDescriptor, WatchMask};
 use log::{debug, error, info, trace};
 use ssh2::Session;
 use std::collections::{HashMap, HashSet};
@@ -87,17 +87,10 @@ impl PendingChanges {
         let dir = self.dirs.get(&event.wd);
         match (dir, event.name) {
             (Some(dir), Some(p)) => {
-                if event.mask.contains(EventMask::CREATE) ||
-                   event.mask.contains(EventMask::CLOSE_WRITE) ||
-                   event.mask.contains(EventMask::DELETE) ||
-                   event.mask.contains(EventMask::MOVED_FROM) ||
-                   event.mask.contains(EventMask::MOVED_TO)
-                {
-                    let mut pb = dir.clone();
-                    pb.push(p);
-                    self.add_path(pb);
-                    return true;
-                }
+                let mut pb = dir.clone();
+                pb.push(p);
+                self.add_path(pb);
+                return true;
             }
             _ => (),
         }
