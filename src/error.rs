@@ -21,15 +21,13 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self.source() {
             Some(src) => fmt::Display::fmt(src, f),
-            None => {
-                match self {
-                    Error::InvalidArgs() => f.write_str("invlaid args"),
-                    Error::ScpLength(u0, u1) => {
-                        f.write_fmt(format_args!("scp length: {} != {}", u0, u1))
-                    },
-                    _ => unreachable!(),
+            None => match self {
+                Error::InvalidArgs() => f.write_str("invlaid args"),
+                Error::ScpLength(u0, u1) => {
+                    f.write_fmt(format_args!("scp length: {} != {}", u0, u1))
                 }
-            }
+                _ => unreachable!(),
+            },
         }
     }
 }

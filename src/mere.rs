@@ -2,7 +2,7 @@
 //
 // Copyright (C) 2018-2019  Minnesota Department of Transportation
 //
-use crate::error::{Result, Error::ScpLength};
+use crate::error::{Error::ScpLength, Result};
 use inotify::{Event, Inotify, WatchDescriptor, WatchMask};
 use log::{debug, error, info, trace};
 use ssh2::Session;
@@ -51,7 +51,12 @@ impl PendingChanges {
             let wd = inotify.add_watch(dir, mask)?;
             dirs.insert(wd, dir.into());
         }
-        Ok(PendingChanges { host, inotify, dirs, changes })
+        Ok(PendingChanges {
+            host,
+            inotify,
+            dirs,
+            changes,
+        })
     }
     /// Wait for watch events
     fn wait_events(&mut self) -> Result<()> {
@@ -114,12 +119,12 @@ impl PendingChanges {
             Ok(session) => {
                 authenticate_session(&session, username)?;
                 self.mirror_session(&session)?;
-            },
+            }
             Err(e) => {
                 error!("{}, host: {}", e, self.host);
                 debug!("waiting for 10 seconds to try again");
                 thread::sleep(Duration::from_secs(10));
-            },
+            }
         }
         Ok(())
     }
@@ -158,12 +163,10 @@ fn check_path(p: &Path) -> bool {
 /// Check whether a file path is hidden
 fn check_path_hidden(p: &Path) -> bool {
     match p.file_name() {
-        Some(n) => {
-            match n.to_str() {
-                Some(sn) => check_hidden(sn),
-                _ => true,
-            }
-        }
+        Some(n) => match n.to_str() {
+            Some(sn) => check_hidden(sn),
+            _ => true,
+        },
         None => true,
     }
 }
@@ -179,12 +182,10 @@ fn check_hidden(sn: &str) -> bool {
 /// Check whether a file path is temporary
 fn check_path_temp(p: &Path) -> bool {
     match p.extension() {
-        Some(e) => {
-            match e.to_str() {
-                Some(se) => se.ends_with("~"),
-                _ => true,
-            }
-        }
+        Some(e) => match e.to_str() {
+            Some(se) => se.ends_with("~"),
+            _ => true,
+        },
         None => false,
     }
 }
