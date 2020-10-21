@@ -1,6 +1,6 @@
 // mere.rs    Directory mirroring service
 //
-// Copyright (C) 2018-2019  Minnesota Department of Transportation
+// Copyright (C) 2018-2020  Minnesota Department of Transportation
 //
 use crate::error::{Error::ScpLength, Result};
 use inotify::{Event, Inotify, WatchDescriptor, WatchMask};
@@ -58,6 +58,7 @@ impl PendingChanges {
             changes,
         })
     }
+
     /// Wait for watch events
     fn wait_events(&mut self) -> Result<()> {
         trace!("waiting for watch events");
@@ -77,6 +78,7 @@ impl PendingChanges {
         }
         Ok(())
     }
+
     /// Check for more watch events
     fn check_more_events(&mut self, mut buffer: &mut [u8]) -> Result<bool> {
         let mut more = false;
@@ -86,6 +88,7 @@ impl PendingChanges {
         }
         Ok(more)
     }
+
     /// Add a pending change
     fn add_change(&mut self, event: Event<&OsStr>) -> bool {
         trace!("notify event: {:?}", event);
@@ -102,6 +105,7 @@ impl PendingChanges {
         trace!("ignored event: {:?}", event);
         false
     }
+
     /// Add a pending PathBuf change
     fn add_path(&mut self, p: PathBuf) {
         if check_path(p.as_ref()) {
@@ -111,6 +115,7 @@ impl PendingChanges {
             debug!("ignoring path: {:?}", p);
         }
     }
+
     /// Handle an SSH session.
     ///
     /// * `username` Name of user to use for authentication.
@@ -128,6 +133,7 @@ impl PendingChanges {
         }
         Ok(())
     }
+
     /// Mirror files for one session.
     ///
     /// * `session` SSH session.
@@ -140,6 +146,7 @@ impl PendingChanges {
         }
         Ok(())
     }
+
     /// Mirror pending changes.
     ///
     /// * `session` SSH session.
