@@ -316,14 +316,29 @@ fn try_copy_file(sftp: &Sftp, path: &Path) -> Result<()> {
     r
 }
 
+/// Create a temp file path
+fn temp_file(path: &Path) -> PathBuf {
+    let mut temp = PathBuf::new();
+    temp.push(path.parent().unwrap());
+    temp.push(".mere.temp");
+    temp
+}
+
+/// Get sftp rename flags
+fn rename_flags() -> Option<RenameFlags> {
+    let mut flags = RenameFlags::empty();
+    flags.insert(RenameFlags::OVERWRITE);
+    flags.insert(RenameFlags::ATOMIC);
+    flags.insert(RenameFlags::NATIVE);
+    Some(flags)
+}
+
 /// Mirror one file with sftp.
 ///
 /// * `sftp` Sftp instance.
 /// * `path` Path to file.
 fn copy_file(sftp: &Sftp, path: &Path) -> Result<()> {
-    let mut temp = PathBuf::new();
-    temp.push(path.parent().unwrap());
-    temp.push(".mere.temp");
+    let temp = temp_file(path);
     let mut src = File::open(path)?;
     let metadata = src.metadata()?;
     let len = metadata.len();
@@ -339,11 +354,7 @@ fn copy_file(sftp: &Sftp, path: &Path) -> Result<()> {
     let c = std::io::copy(&mut src, &mut rfile)?;
     drop(rfile);
     if c == len {
-        let mut flags = RenameFlags::empty();
-        flags.insert(RenameFlags::OVERWRITE);
-        flags.insert(RenameFlags::ATOMIC);
-        flags.insert(RenameFlags::NATIVE);
-        sftp.rename(temp.as_path(), path, Some(flags))?;
+        sftp.rename(temp.as_path(), path, rename_flags())?;
         Ok(())
     } else {
         Err(CopyLength(c, len))
