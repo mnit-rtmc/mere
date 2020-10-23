@@ -9,11 +9,15 @@ use ssh2::{OpenFlags, OpenType, RenameFlags, Session, Sftp};
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 use std::fs::File;
+use std::io;
 use std::net::TcpStream;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, Instant};
+
+/// Use 64 KB buffers
+const CAPACITY: usize = 64 * 1024;
 
 /// Pending changes to mirror
 struct PendingChanges {
@@ -336,20 +340,22 @@ fn rename_flags() -> Option<RenameFlags> {
 /// * `path` Path to file.
 fn copy_file(sftp: &Sftp, path: &Path) -> Result<()> {
     let temp = temp_file(path);
-    let mut src = File::open(path)?;
+    let src = File::open(path)?;
     let metadata = src.metadata()?;
     let len = metadata.len();
     // Mask off higher mode bits to avoid a "file corrupt" error
     let mode = (metadata.permissions().mode() & 0o7777) as i32;
     debug!("copying {:?} with len: {} and mode {:o}", path, len, mode);
-    let mut rfile = sftp.open_mode(
+    let dst = sftp.open_mode(
         temp.as_path(),
         OpenFlags::TRUNCATE,
         mode,
         OpenType::File,
     )?;
-    let c = std::io::copy(&mut src, &mut rfile)?;
-    drop(rfile);
+    let mut src = io::BufReader::with_capacity(CAPACITY, src);
+    let mut dst = io::BufWriter::with_capacity(CAPACITY, dst);
+    let c = io::copy(&mut src, &mut dst)?;
+    drop(dst);
     if c == len {
         sftp.rename(temp.as_path(), path, rename_flags())?;
         Ok(())
