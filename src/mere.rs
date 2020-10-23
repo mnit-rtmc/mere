@@ -302,7 +302,7 @@ fn authenticate_agent(session: &Session, username: &str) -> Result<()> {
     Ok(())
 }
 
-/// Try to scp a file
+/// Try to copy a file
 ///
 /// * `sftp` Sftp instance.
 /// * `path` Path to file.
@@ -327,8 +327,7 @@ fn copy_file(sftp: &Sftp, path: &Path) -> Result<()> {
     let mut src = File::open(path)?;
     let metadata = src.metadata()?;
     let len = metadata.len();
-    // Mask off higher mode bits to prevent scp_send
-    // from returning a "file corrupt" error
+    // Mask off higher mode bits to avoid a "file corrupt" error
     let mode = (metadata.permissions().mode() & 0o7777) as i32;
     debug!("copying {:?} with len: {} and mode {:o}", path, len, mode);
     let mut rfile = sftp.open_mode(
