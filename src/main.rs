@@ -4,10 +4,10 @@
 //
 #![forbid(unsafe_code)]
 
+use anyhow::anyhow;
 use log::{error, info};
 use std::env;
 
-mod error;
 mod mere;
 
 /// Mere version from cargo manifest
@@ -22,6 +22,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Ok(mere::mirror_files(&args[1], &args[2..])?)
     } else {
         error!("Usage: {:} [host] [directory 0] … [directory N]", args[0]);
-        Err(Box::new(error::Error::InvalidArgs()))
+        Err(anyhow!("Invalid arguments"))?;
+        unreachable!();
     }
 }

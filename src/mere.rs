@@ -2,7 +2,7 @@
 //
 // Copyright (C) 2018-2020  Minnesota Department of Transportation
 //
-use crate::error::{Error::CopyLength, Result};
+use anyhow::{anyhow, Result};
 use inotify::{Event, Inotify, WatchDescriptor, WatchMask};
 use log::{debug, error, info, trace};
 use ssh2::{OpenFlags, OpenType, RenameFlags, Session, Sftp};
@@ -354,7 +354,7 @@ fn copy_file(sftp: &Sftp, path: &Path) -> Result<()> {
         sftp.rename(temp.as_path(), path, rename_flags())?;
         Ok(())
     } else {
-        Err(CopyLength(c, len))
+        Err(anyhow!("copy length wrong: {} vs {}", c, len))
     }
 }
 
