@@ -1,6 +1,6 @@
 // error.rs    Directory mirroring service
 //
-// Copyright (c) 2019  Minnesota Department of Transportation
+// Copyright (c) 2019-2020  Minnesota Department of Transportation
 //
 use std::error::Error as _;
 use std::{fmt, io};
@@ -11,7 +11,7 @@ pub enum Error {
     Io(io::Error),
     Ssh(ssh2::Error),
     InvalidArgs(),
-    ScpLength(u64, u64),
+    CopyLength(u64, u64),
 }
 
 /// Custom Result
@@ -23,8 +23,8 @@ impl fmt::Display for Error {
             Some(src) => fmt::Display::fmt(src, f),
             None => match self {
                 Error::InvalidArgs() => f.write_str("invlaid args"),
-                Error::ScpLength(u0, u1) => {
-                    f.write_fmt(format_args!("scp length: {} != {}", u0, u1))
+                Error::CopyLength(u0, u1) => {
+                    f.write_fmt(format_args!("copy length: {} != {}", u0, u1))
                 }
                 _ => unreachable!(),
             },

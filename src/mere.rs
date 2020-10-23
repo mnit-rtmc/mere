@@ -2,10 +2,10 @@
 //
 // Copyright (C) 2018-2020  Minnesota Department of Transportation
 //
-use crate::error::{Error::ScpLength, Result};
+use crate::error::{Error::CopyLength, Result};
 use inotify::{Event, Inotify, WatchDescriptor, WatchMask};
 use log::{debug, error, info, trace};
-use ssh2::Session;
+use ssh2::{OpenFlags, OpenType, RenameFlags, Session, Sftp};
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 use std::fs::File;
@@ -138,24 +138,69 @@ impl PendingChanges {
     ///
     /// * `session` SSH session.
     fn mirror_session(&mut self, session: &Session) -> Result<()> {
+        let sftp = session.sftp()?;
+        self.mirror_all(&sftp)?;
         loop {
             self.wait_events()?;
-            if let Err(_) = self.mirror_pending(session) {
+            if let Err(_) = self.mirror_pending(&sftp) {
                 break;
             }
         }
         Ok(())
     }
 
+    /// Mirror all files to destination host
+    fn mirror_all(&self, sftp: &Sftp) -> Result<()> {
+        trace!("mirror_all");
+        for dir in self.dirs.values() {
+            self.mirror_directory(sftp, &dir)?;
+        }
+        Ok(())
+    }
+
+    /// Mirror one directory to destination host
+    fn mirror_directory(&self, sftp: &Sftp, dir: &Path) -> Result<()> {
+        trace!("mirror_directory: {:?}", dir);
+        let mut remote = sftp.readdir(dir)?;
+        for entry in std::fs::read_dir(dir)? {
+            if let Ok(entry) = entry {
+                let path = entry.path();
+                let pos = remote.iter().position(|p| (*p).0 == path);
+                let rfile = pos.map(|i| remote.swap_remove(i));
+                let copy = rfile.is_none()
+                    || match entry.metadata() {
+                        Ok(metadata) => {
+                            let rstat = rfile.unwrap().1; // can't be none
+                            let rlen = rstat.size.unwrap_or(0);
+                            metadata.is_file() && metadata.len() != rlen
+                        }
+                        Err(e) => {
+                            error!("metadata error {:?} on {:?}", e, &path);
+                            false
+                        }
+                    };
+                if copy {
+                    try_copy_file(sftp, path.as_path())?;
+                }
+            }
+        }
+        // remove files which are not in source directory
+        for (path, _) in remote {
+            try_rm_file(sftp, path.as_path())?;
+        }
+        Ok(())
+    }
+
     /// Mirror pending changes.
     ///
-    /// * `session` SSH session.
-    fn mirror_pending(&mut self, session: &Session) -> Result<()> {
+    /// * `sftp` Sftp instance.
+    fn mirror_pending(&mut self, sftp: &Sftp) -> Result<()> {
         for p in self.changes.drain() {
-            if check_file(p.as_ref()) {
-                try_scp_file(session, &p)?;
+            let path = p.as_path();
+            if check_file(path) {
+                try_copy_file(sftp, path)?;
             } else {
-                try_rm_file(session, &p)?;
+                try_rm_file(sftp, path)?;
             }
         }
         Ok(())
@@ -259,64 +304,74 @@ fn authenticate_agent(session: &Session, username: &str) -> Result<()> {
 
 /// Try to scp a file
 ///
-/// * `session` SSH session.
-/// * `p` Path to file.
-fn try_scp_file(session: &Session, p: &PathBuf) -> Result<()> {
+/// * `sftp` Sftp instance.
+/// * `path` Path to file.
+fn try_copy_file(sftp: &Sftp, path: &Path) -> Result<()> {
     let t = Instant::now();
-    let r = scp_file(session, &p);
+    let r = copy_file(sftp, path);
     match &r {
-        Ok(_) => info!("copied {:?} in {:?}", p, t.elapsed()),
-        Err(e) => error!("{}, copying {:?}", e, p),
+        Ok(_) => info!("copied {:?} in {:?}", path, t.elapsed()),
+        Err(e) => error!("{}, copying {:?}", e, path),
     }
     r
 }
 
-/// Mirror one file with scp.
+/// Mirror one file with sftp.
 ///
-/// * `session` SSH session.
-/// * `p` Path to file.
-fn scp_file(session: &Session, p: &PathBuf) -> Result<()> {
-    let mut fi = File::open(&p)?;
-    let metadata = fi.metadata()?;
+/// * `sftp` Sftp instance.
+/// * `path` Path to file.
+fn copy_file(sftp: &Sftp, path: &Path) -> Result<()> {
+    let mut temp = PathBuf::new();
+    temp.push(path.parent().unwrap());
+    temp.push(".mere.temp");
+    let mut src = File::open(path)?;
+    let metadata = src.metadata()?;
     let len = metadata.len();
     // Mask off higher mode bits to prevent scp_send
     // from returning a "file corrupt" error
     let mode = (metadata.permissions().mode() & 0o7777) as i32;
-    debug!("copying {:?} with len: {} and mode {:o}", p, len, mode);
-    let mut fo = session.scp_send(p.as_path(), mode, len, None)?;
-    let c = std::io::copy(&mut fi, &mut fo)?;
+    debug!("copying {:?} with len: {} and mode {:o}", path, len, mode);
+    let mut rfile = sftp.open_mode(
+        temp.as_path(),
+        OpenFlags::TRUNCATE,
+        mode,
+        OpenType::File,
+    )?;
+    let c = std::io::copy(&mut src, &mut rfile)?;
+    drop(rfile);
     if c == len {
+        let mut flags = RenameFlags::empty();
+        flags.insert(RenameFlags::OVERWRITE);
+        flags.insert(RenameFlags::ATOMIC);
+        flags.insert(RenameFlags::NATIVE);
+        sftp.rename(temp.as_path(), path, Some(flags))?;
         Ok(())
     } else {
-        Err(ScpLength(c, len))
+        Err(CopyLength(c, len))
     }
 }
 
 /// Try to remove one file.
 ///
-/// * `session` SSH session.
-/// * `p` Path to file.
-fn try_rm_file(session: &Session, p: &PathBuf) -> Result<()> {
+/// * `sftp` Sftp instance.
+/// * `path` Path to file.
+fn try_rm_file(sftp: &Sftp, path: &Path) -> Result<()> {
     let t = Instant::now();
-    let r = rm_file(session, &p);
+    let r = rm_file(sftp, path);
     match &r {
-        Ok(_) => info!("removed {:?} in {:?}", p, t.elapsed()),
-        Err(e) => error!("{}, removing {:?}", e, p),
+        Ok(_) => info!("removed {:?} in {:?}", path, t.elapsed()),
+        Err(e) => error!("{}, removing {:?}", e, path),
     }
     r
 }
 
 /// Remove one file.
 ///
-/// * `session` SSH session.
-/// * `p` Path to file.
-fn rm_file(session: &Session, p: &PathBuf) -> Result<()> {
-    debug!("removing {:?}", p);
-    let mut channel = session.channel_session()?;
-    let mut cmd = String::new();
-    cmd.push_str("rm -f ");
-    cmd.push_str(p.to_str().unwrap());
-    channel.exec(&cmd)?;
+/// * `sftp` Sftp instance.
+/// * `path` Path to file.
+fn rm_file(sftp: &Sftp, path: &Path) -> Result<()> {
+    debug!("removing {:?}", path);
+    sftp.unlink(path)?;
     Ok(())
 }
 
