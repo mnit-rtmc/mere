@@ -93,14 +93,11 @@ impl PendingChanges {
     fn add_change(&mut self, event: Event<&OsStr>) -> bool {
         trace!("notify event: {:?}", event);
         let dir = self.dirs.get(&event.wd);
-        match (dir, event.name) {
-            (Some(dir), Some(p)) => {
-                let mut pb = dir.clone();
-                pb.push(p);
-                self.add_path(pb);
-                return true;
-            }
-            _ => (),
+        if let (Some(dir), Some(p)) = (dir, event.name) {
+            let mut pb = dir.clone();
+            pb.push(p);
+            self.add_path(pb);
+            return true;
         }
         trace!("ignored event: {:?}", event);
         false
@@ -142,7 +139,7 @@ impl PendingChanges {
         self.mirror_all(&sftp)?;
         loop {
             self.wait_events()?;
-            if let Err(_) = self.mirror_pending(&sftp) {
+            if self.mirror_pending(&sftp).is_err() {
                 break;
             }
         }
@@ -228,14 +225,14 @@ const VIM_TEMP: &str = "4913";
 
 /// Check whether a file name is hidden
 fn check_hidden(sn: &str) -> bool {
-    sn.starts_with(".") || sn == VIM_TEMP
+    sn.starts_with('.') || sn == VIM_TEMP
 }
 
 /// Check whether a file path is temporary
 fn check_path_temp(p: &Path) -> bool {
     match p.extension() {
         Some(e) => match e.to_str() {
-            Some(se) => se.ends_with("~"),
+            Some(se) => se.ends_with('~'),
             _ => true,
         },
         None => false,
@@ -271,9 +268,9 @@ fn authenticate_session(session: &Session, username: &str) -> Result<()> {
     // try using agent auth -- maybe we're running interactively
     authenticate_pubkey(session, username)
         .or_else(|_| authenticate_agent(session, username))
-        .or_else(|e| {
+        .map_err(|e| {
             error!("authentication failed for user {}", username);
-            Err(e)
+            e
         })
 }
 
@@ -308,12 +305,12 @@ fn authenticate_agent(session: &Session, username: &str) -> Result<()> {
 /// * `path` Path to file.
 fn try_copy_file(sftp: &Sftp, path: &Path) -> Result<()> {
     let t = Instant::now();
-    let r = copy_file(sftp, path);
-    match &r {
+    let res = copy_file(sftp, path);
+    match &res {
         Ok(_) => info!("copied {:?} in {:?}", path, t.elapsed()),
         Err(e) => error!("{}, copying {:?}", e, path),
     }
-    r
+    res
 }
 
 /// Create a temp file path
@@ -367,12 +364,12 @@ fn copy_file(sftp: &Sftp, path: &Path) -> Result<()> {
 /// * `path` Path to file.
 fn try_rm_file(sftp: &Sftp, path: &Path) -> Result<()> {
     let t = Instant::now();
-    let r = rm_file(sftp, path);
-    match &r {
+    let res = rm_file(sftp, path);
+    match &res {
         Ok(_) => info!("removed {:?} in {:?}", path, t.elapsed()),
         Err(e) => error!("{}, removing {:?}", e, path),
     }
-    r
+    res
 }
 
 /// Remove one file.

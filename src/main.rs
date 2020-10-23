@@ -1,6 +1,6 @@
 // main.rs    Directory mirroring service
 //
-// Copyright (C)  2018-2019  Minnesota Department of Transportation
+// Copyright (C)  2018-2020  Minnesota Department of Transportation
 //
 #![forbid(unsafe_code)]
 
@@ -11,7 +11,7 @@ mod error;
 mod mere;
 
 /// Mere version from cargo manifest
-const VERSION: &'static str = env!("CARGO_PKG_VERSION");
+const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// Main function
 fn main() -> Result<(), Box<dyn std::error::Error>> {
