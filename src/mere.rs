@@ -51,9 +51,10 @@ impl PendingChanges {
         let mask = watch_mask();
         let mut dirs = HashMap::new();
         for dir in directories {
-            info!("  Directory {:}", dir);
-            let wd = inotify.add_watch(dir, mask)?;
-            dirs.insert(wd, dir.into());
+            let dir = std::fs::canonicalize(dir)?;
+            info!("  Directory {:?}", dir);
+            let wd = inotify.add_watch(&dir, mask)?;
+            dirs.insert(wd, dir);
         }
         Ok(PendingChanges {
             host,
