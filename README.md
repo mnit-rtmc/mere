@@ -11,7 +11,7 @@ cargo build --release
 ```
 
 * Edit `./mere.service`
-* Add {host:post} and directories to `ExecStart=/usr/local/bin/mere` line
+* Add {host:port} and directories to `ExecStart=/usr/local/bin/mere` line
 
 ## Installation
 
