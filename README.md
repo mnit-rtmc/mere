@@ -7,9 +7,9 @@ inotify, ssh, and bundled openssl.
 
 Authentication happens using one of two methods:
 
-1. Public key authentication using private key from
-   `/home/{username}/.ssh/id_rsa`.  This only works if the private key file
-   does not require a password.
+1. Public key authentication using a private key from
+   `/home/{username}/.ssh/id_rsa`.  This only works if the file does not require
+   a password.
 2. Agent authentication, which should work when running interactively.
 
 ## Building
@@ -22,11 +22,11 @@ cargo build --release
 
 ## Running
 
-You must specify the destination host as well as one or more directories to
-mirror.
+You must specify the destination host as well as one or more source directories
+to mirror.
 
 ```
-./target/release/mere {host} {dir 0} ... {dir N}
+./target/release/mere -d {dst host} -s {dir 0} ... {dir N}
 ```
 
 ## Running as a systemd Service
