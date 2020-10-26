@@ -39,7 +39,7 @@ cp ./mere.service /etc/systemd/system/
 ```
 
 * Edit `/etc/systemd/system/mere.service`
-* Add {host:port} and directories to `ExecStart=/usr/local/bin/mere` line
+* Replace {destination} and {sources} on `ExecStart=/usr/local/bin/mere` line
 
 ```
 systemctl enable mere

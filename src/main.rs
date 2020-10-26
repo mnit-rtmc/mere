@@ -24,7 +24,7 @@ struct MereOptions {
 
     /// One or more source directories to mirror
     #[options(required, short = "s")]
-    source: Vec<String>,
+    sources: Vec<String>,
 }
 
 /// Main function
@@ -32,5 +32,5 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("mere v{}", VERSION);
     let opts = MereOptions::parse_args_default_or_exit();
     env_logger::builder().format_timestamp(None).init();
-    Ok(mere::mirror_files(&opts.destination, &opts.source)?)
+    Ok(mere::mirror_files(&opts.destination, &opts.sources)?)
 }

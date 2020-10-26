@@ -4,7 +4,7 @@ StartLimitIntervalSec=0
 
 [Service]
 Environment=RUST_LOG=warn
-ExecStart=/usr/local/bin/mere
+ExecStart=/usr/local/bin/mere -d {destination} -s {sources}
 Restart=always
 RestartSec=2
 User=tms
