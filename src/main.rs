@@ -4,25 +4,33 @@
 //
 #![forbid(unsafe_code)]
 
-use anyhow::anyhow;
-use log::{error, info};
-use std::env;
-
 mod mere;
+
+use gumdrop::Options;
+use std::env;
 
 /// Mere version from cargo manifest
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+// Mere program options
+#[derive(Debug, Options)]
+struct MereOptions {
+    /// Print help message
+    help: bool,
+
+    /// Destination host
+    #[options(required, short = "d")]
+    destination: String,
+
+    /// One or more source directories to mirror
+    #[options(required, short = "s")]
+    source: Vec<String>,
+}
+
 /// Main function
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    println!("mere v{}", VERSION);
+    let opts = MereOptions::parse_args_default_or_exit();
     env_logger::builder().format_timestamp(None).init();
-    info!("mere v{}", VERSION);
-    let args: Vec<String> = env::args().into_iter().collect();
-    if args.len() > 2 {
-        Ok(mere::mirror_files(&args[1], &args[2..])?)
-    } else {
-        error!("Usage: {:} [host] [directory 0] … [directory N]", args[0]);
-        Err(anyhow!("Invalid arguments"))?;
-        unreachable!();
-    }
+    Ok(mere::mirror_files(&opts.destination, &opts.source)?)
 }
