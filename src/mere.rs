@@ -66,12 +66,12 @@ impl PendingChanges {
 
     /// Wait for watch events
     fn wait_events(&mut self) -> Result<()> {
-        trace!("waiting for watch events");
+        trace!("wait_events");
         let mut buffer = [0; 1024];
         while self.changes.is_empty() {
             let events = self.inotify.read_events_blocking(&mut buffer)?;
             for event in events {
-                self.add_change(event);
+                self.add_pending_change(event);
             }
         }
         // Check for more events until there are none
@@ -86,17 +86,18 @@ impl PendingChanges {
 
     /// Check for more watch events
     fn check_more_events(&mut self, mut buffer: &mut [u8]) -> Result<bool> {
+        trace!("check_more_events");
         let mut more = false;
         let events = self.inotify.read_events(&mut buffer)?;
         for event in events {
-            more |= self.add_change(event);
+            more |= self.add_pending_change(event);
         }
         Ok(more)
     }
 
     /// Add a pending change
-    fn add_change(&mut self, event: Event<&OsStr>) -> bool {
-        trace!("notify event: {:?}", event);
+    fn add_pending_change(&mut self, event: Event<&OsStr>) -> bool {
+        trace!("add_pending_change: {:?}", event);
         let dir = self.dirs.get(&event.wd);
         if let (Some(dir), Some(p)) = (dir, event.name) {
             let mut pb = dir.clone();
@@ -122,6 +123,7 @@ impl PendingChanges {
     ///
     /// * `username` Name of user to use for authentication.
     fn handle_session(&mut self, username: &str) -> Result<()> {
+        trace!("handle_session: {}", username);
         match create_session(&self.host) {
             Ok(session) => {
                 authenticate_session(&session, username)?;
@@ -140,6 +142,7 @@ impl PendingChanges {
     ///
     /// * `session` SSH session.
     fn mirror_session(&mut self, session: &Session) -> Result<()> {
+        trace!("mirror_session");
         let sftp = session.sftp()?;
         self.mirror_all(&sftp)?;
         loop {
@@ -197,6 +200,7 @@ impl PendingChanges {
     ///
     /// * `sftp` Sftp instance.
     fn mirror_pending(&mut self, sftp: &Sftp) -> Result<()> {
+        trace!("mirror_pending");
         for p in self.changes.drain() {
             let path = p.as_path();
             if check_file(path) {
