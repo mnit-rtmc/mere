@@ -2,7 +2,7 @@
 //
 // Copyright (C) 2018-2020  Minnesota Department of Transportation
 //
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use inotify::{Event, Inotify, WatchDescriptor, WatchMask};
 use log::{debug, error, info, trace};
 use ssh2::{OpenFlags, OpenType, RenameFlags, Session, Sftp};
@@ -51,9 +51,11 @@ impl PendingChanges {
         let mask = watch_mask();
         let mut dirs = HashMap::new();
         for dir in directories {
-            let dir = std::fs::canonicalize(dir)?;
+            let dir = std::fs::canonicalize(dir)
+                .with_context(|| format!("Invalid directory \"{}\"", dir))?;
             info!("  Directory {:?}", dir);
-            let wd = inotify.add_watch(&dir, mask)?;
+            let wd = inotify.add_watch(&dir, mask)
+                .with_context(|| format!("Could not add watch {:?}", dir))?;
             dirs.insert(wd, dir);
         }
         Ok(PendingChanges {
@@ -399,7 +401,7 @@ fn rm_file(sftp: &Sftp, path: &Path) -> Result<()> {
 /// * `directories` Slice of absolute directory names.
 pub fn mirror_files(host: &str, directories: &[String]) -> Result<()> {
     let username = whoami::username();
-    info!("Mirroring to {:} as user {:}", host, username);
+    info!("Mirroring to {} as user {}", host, username);
     let mut pc = PendingChanges::new(host, directories)?;
     loop {
         pc.wait_events()?;
