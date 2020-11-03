@@ -14,13 +14,13 @@ use std::net::ToSocketAddrs;
 /// Mere version from cargo manifest
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-// Mere program options
+/// A file mirroring tool
 #[derive(Debug, Options)]
 struct MereOptions {
     /// Print help message
     help: bool,
 
-    /// Destination host
+    /// Destination: <host_name> or <host_name>:<port>
     #[options(required, short = "d")]
     destination: String,
 
