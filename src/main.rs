@@ -6,8 +6,10 @@
 
 mod mere;
 
+use anyhow::Context;
 use gumdrop::Options;
 use std::env;
+use std::net::ToSocketAddrs;
 
 /// Mere version from cargo manifest
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -32,5 +34,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("mere v{}", VERSION);
     let opts = MereOptions::parse_args_default_or_exit();
     env_logger::builder().format_timestamp(None).init();
-    Ok(mere::mirror_files(&opts.destination, &opts.sources)?)
+    let addrs = socket_addr(&opts.destination)?;
+    Ok(mere::mirror_files(&addrs, &opts.sources)?)
+}
+
+/// Validate destination host to parse as socket address
+fn socket_addr(dest: &str) -> anyhow::Result<String> {
+    let mut addr = dest.to_string();
+    if addr.to_socket_addrs().is_err() {
+        addr.push_str(":22");
+        addr.to_socket_addrs()
+            .with_context(|| format!("Invalid destination — {}", dest))?;
+    }
+    Ok(addr)
 }
