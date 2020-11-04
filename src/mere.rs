@@ -54,7 +54,8 @@ impl PendingChanges {
             let dir = std::fs::canonicalize(dir)
                 .with_context(|| format!("Invalid directory \"{}\"", dir))?;
             info!("  Directory {:?}", dir);
-            let wd = inotify.add_watch(&dir, mask)
+            let wd = inotify
+                .add_watch(&dir, mask)
                 .with_context(|| format!("Could not add watch {:?}", dir))?;
             dirs.insert(wd, dir);
         }
@@ -73,7 +74,7 @@ impl PendingChanges {
         while self.changes.is_empty() {
             let events = self.inotify.read_events_blocking(&mut buffer)?;
             for event in events {
-                self.add_pending_change(event);
+                self.add_change_event(event);
             }
         }
         // Check for more events until there are none
@@ -92,32 +93,32 @@ impl PendingChanges {
         let mut more = false;
         let events = self.inotify.read_events(&mut buffer)?;
         for event in events {
-            more |= self.add_pending_change(event);
+            more |= self.add_change_event(event);
         }
         Ok(more)
     }
 
-    /// Add a pending change
-    fn add_pending_change(&mut self, event: Event<&OsStr>) -> bool {
-        trace!("add_pending_change: {:?}", event);
+    /// Add a change from a given inotify event
+    fn add_change_event(&mut self, event: Event<&OsStr>) -> bool {
+        trace!("add_change_event: {:?}", event);
         let dir = self.dirs.get(&event.wd);
-        if let (Some(dir), Some(p)) = (dir, event.name) {
+        if let (Some(dir), Some(name)) = (dir, event.name) {
             let mut pb = dir.clone();
-            pb.push(p);
-            self.add_path(pb);
+            pb.push(name);
+            self.add_change_path(pb);
             return true;
         }
-        trace!("ignored event: {:?}", event);
+        debug!("ignored event: {:?}", event);
         false
     }
 
     /// Add a pending PathBuf change
-    fn add_path(&mut self, p: PathBuf) {
-        if check_path(p.as_ref()) {
-            debug!("adding path: {:?}", p);
-            self.changes.insert(p);
+    fn add_change_path(&mut self, path: PathBuf) {
+        if is_path_valid(&path) {
+            debug!("adding path: {:?}", path);
+            self.changes.insert(path);
         } else {
-            debug!("ignoring path: {:?}", p);
+            debug!("ignoring path: {:?}", path);
         }
     }
 
@@ -149,11 +150,8 @@ impl PendingChanges {
         self.mirror_all(&sftp)?;
         loop {
             self.wait_events()?;
-            if self.mirror_pending(&sftp).is_err() {
-                break;
-            }
+            self.mirror_pending(&sftp)?;
         }
-        Ok(())
     }
 
     /// Mirror all files to destination host
@@ -168,8 +166,12 @@ impl PendingChanges {
     /// Mirror one directory to destination host
     fn mirror_directory(&self, sftp: &Sftp, dir: &Path) -> Result<()> {
         trace!("mirror_directory: {:?}", dir);
-        let mut remote = sftp.readdir(dir)?;
-        for entry in std::fs::read_dir(dir)? {
+        let mut remote = sftp
+            .readdir(dir)
+            .with_context(|| format!("sftp readdir {:?}", dir))?;
+        for entry in std::fs::read_dir(dir)
+            .with_context(|| format!("read_dir {:?}", dir))?
+        {
             if let Ok(entry) = entry {
                 let path = entry.path();
                 let pos = remote.iter().position(|p| (*p).0 == path);
@@ -193,7 +195,7 @@ impl PendingChanges {
         }
         // remove files which are not in source directory
         for (path, _) in remote {
-            try_rm_file(sftp, path.as_path())?;
+            rm_file(sftp, path.as_path())?;
         }
         Ok(())
     }
@@ -203,12 +205,11 @@ impl PendingChanges {
     /// * `sftp` Sftp instance.
     fn mirror_pending(&mut self, sftp: &Sftp) -> Result<()> {
         trace!("mirror_pending");
-        for p in self.changes.drain() {
-            let path = p.as_path();
-            if check_file(path) {
-                try_copy_file(sftp, path)?;
+        for path in self.changes.drain() {
+            if is_file(&path) {
+                try_copy_file(sftp, &path)?;
             } else {
-                try_rm_file(sftp, path)?;
+                rm_file(sftp, &path)?;
             }
         }
         Ok(())
@@ -216,13 +217,13 @@ impl PendingChanges {
 }
 
 /// Check if a path is valid
-fn check_path(p: &Path) -> bool {
-    p.is_absolute() && !check_path_hidden(p) && !check_path_temp(p)
+fn is_path_valid(path: &Path) -> bool {
+    path.is_absolute() && !is_path_hidden(path) && !is_path_temp(path)
 }
 
 /// Check whether a file path is hidden
-fn check_path_hidden(p: &Path) -> bool {
-    match p.file_name() {
+fn is_path_hidden(path: &Path) -> bool {
+    match path.file_name() {
         Some(n) => match n.to_str() {
             Some(sn) => check_hidden(sn),
             _ => true,
@@ -240,8 +241,8 @@ fn check_hidden(sn: &str) -> bool {
 }
 
 /// Check whether a file path is temporary
-fn check_path_temp(p: &Path) -> bool {
-    match p.extension() {
+fn is_path_temp(path: &Path) -> bool {
+    match path.extension() {
         Some(e) => match e.to_str() {
             Some(se) => se.ends_with('~'),
             _ => true,
@@ -251,8 +252,8 @@ fn check_path_temp(p: &Path) -> bool {
 }
 
 /// Check if a file exists
-fn check_file(p: &Path) -> bool {
-    match std::fs::metadata(p) {
+fn is_file(path: &Path) -> bool {
+    match std::fs::metadata(path) {
         Ok(metadata) => metadata.is_file(),
         Err(_) => false,
     }
@@ -274,15 +275,15 @@ fn create_session(host: &str) -> Result<Session> {
 /// * `session` SSH session.
 /// * `username` User to authenticate.
 fn authenticate_session(session: &Session, username: &str) -> Result<()> {
-    debug!("authenticating user {}", username);
+    trace!("authenticate_session {}", username);
     // First, try using key with no pass-phrase.  If that doesn't work,
     // try using agent auth -- maybe we're running interactively
     authenticate_pubkey(session, username)
         .or_else(|_| authenticate_agent(session, username))
-        .map_err(|e| {
-            error!("authentication failed for user {}", username);
-            e
-        })
+        .with_context(|| {
+            format!("authentication failed for user {}", username)
+        })?;
+    Ok(())
 }
 
 /// Authenticate an SSH session using public key.
@@ -290,12 +291,12 @@ fn authenticate_session(session: &Session, username: &str) -> Result<()> {
 /// * `session` SSH session.
 /// * `username` User to authenticate.
 fn authenticate_pubkey(session: &Session, username: &str) -> Result<()> {
-    let mut key = PathBuf::new();
-    key.push("/home");
-    key.push(username);
-    key.push(".ssh");
-    key.push("id_rsa");
-    session.userauth_pubkey_file(username, None, &key, None)?;
+    let mut key_file = PathBuf::new();
+    key_file.push("/home");
+    key_file.push(username);
+    key_file.push(".ssh");
+    key_file.push("id_rsa");
+    session.userauth_pubkey_file(username, None, &key_file, None)?;
     debug!("authenticated {} using pubkey", username);
     Ok(())
 }
@@ -316,12 +317,9 @@ fn authenticate_agent(session: &Session, username: &str) -> Result<()> {
 /// * `path` Path to file.
 fn try_copy_file(sftp: &Sftp, path: &Path) -> Result<()> {
     let t = Instant::now();
-    let res = copy_file(sftp, path);
-    match &res {
-        Ok(_) => info!("copied {:?} in {:?}", path, t.elapsed()),
-        Err(e) => error!("{}, copying {:?}", e, path),
-    }
-    res
+    copy_file(sftp, path).with_context(|| format!("copy failed {:?}", path))?;
+    info!("copied {:?} in {:?}", path, t.elapsed());
+    Ok(())
 }
 
 /// Create a temp file path
@@ -341,18 +339,18 @@ fn rename_flags() -> Option<RenameFlags> {
     Some(flags)
 }
 
-/// Mirror one file with sftp.
+/// Copy one file with sftp.
 ///
 /// * `sftp` Sftp instance.
 /// * `path` Path to file.
 fn copy_file(sftp: &Sftp, path: &Path) -> Result<()> {
+    trace!("copy_file {:?}", path);
     let temp = temp_file(path);
     let src = File::open(path)?;
     let metadata = src.metadata()?;
     let len = metadata.len();
     // Mask off higher mode bits to avoid a "file corrupt" error
     let mode = (metadata.permissions().mode() & 0o7777) as i32;
-    debug!("copying {:?} with len: {} and mode {:o}", path, len, mode);
     let dst = sftp.open_mode(
         temp.as_path(),
         OpenFlags::TRUNCATE,
@@ -361,48 +359,37 @@ fn copy_file(sftp: &Sftp, path: &Path) -> Result<()> {
     )?;
     let mut src = io::BufReader::with_capacity(CAPACITY, src);
     let mut dst = io::BufWriter::with_capacity(CAPACITY, dst);
-    let c = io::copy(&mut src, &mut dst)?;
+    let copied = io::copy(&mut src, &mut dst)?;
     drop(dst);
-    if c == len {
+    if copied == len {
         sftp.rename(temp.as_path(), path, rename_flags())?;
         Ok(())
     } else {
-        Err(anyhow!("copy length wrong: {} vs {}", c, len))
+        Err(anyhow!("copy length wrong: {} != {}", copied, len))
     }
 }
 
-/// Try to remove one file.
-///
-/// * `sftp` Sftp instance.
-/// * `path` Path to file.
-fn try_rm_file(sftp: &Sftp, path: &Path) -> Result<()> {
-    let t = Instant::now();
-    let res = rm_file(sftp, path);
-    match &res {
-        Ok(_) => info!("removed {:?} in {:?}", path, t.elapsed()),
-        Err(e) => error!("{}, removing {:?}", e, path),
-    }
-    res
-}
-
-/// Remove one file.
+/// Remove a remote file.
 ///
 /// * `sftp` Sftp instance.
 /// * `path` Path to file.
 fn rm_file(sftp: &Sftp, path: &Path) -> Result<()> {
-    debug!("removing {:?}", path);
-    sftp.unlink(path)?;
+    trace!("rm_file {:?}", path);
+    let t = Instant::now();
+    sftp.unlink(path)
+        .with_context(|| format!("remove failed {:?}", path))?;
+    info!("removed {:?} in {:?}", path, t.elapsed());
     Ok(())
 }
 
 /// Mirror files to another host.
 ///
-/// * `host` Destination host.
-/// * `directories` Slice of absolute directory names.
-pub fn mirror_files(host: &str, directories: &[String]) -> Result<()> {
+/// * `dest` Destination host.
+/// * `sources` Source directories to mirror.
+pub fn mirror_files(dest: &str, sources: &[String]) -> Result<()> {
     let username = whoami::username();
-    info!("Mirroring to {} as user {}", host, username);
-    let mut pc = PendingChanges::new(host, directories)?;
+    info!("Mirroring to {} as user {}", dest, username);
+    let mut pc = PendingChanges::new(dest, sources)?;
     loop {
         pc.wait_events()?;
         pc.handle_session(&username)?;

@@ -34,8 +34,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("mere v{}", VERSION);
     let opts = MereOptions::parse_args_default_or_exit();
     env_logger::builder().format_timestamp(None).init();
-    let addrs = socket_addr(&opts.destination)?;
-    Ok(mere::mirror_files(&addrs, &opts.sources)?)
+    let dest = socket_addr(&opts.destination)?;
+    Ok(mere::mirror_files(&dest, &opts.sources)?)
 }
 
 /// Validate destination host to parse as socket address
@@ -44,7 +44,7 @@ fn socket_addr(dest: &str) -> anyhow::Result<String> {
     if addr.to_socket_addrs().is_err() {
         addr.push_str(":22");
         addr.to_socket_addrs()
-            .with_context(|| format!("Invalid destination — {}", dest))?;
+            .with_context(|| format!("Invalid destination {:?}", dest))?;
     }
     Ok(addr)
 }
