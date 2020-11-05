@@ -263,7 +263,7 @@ fn is_file(path: &Path) -> bool {
 ///
 /// * `host` Host name (and port) to connect.
 fn create_session(host: &str) -> Result<Session> {
-    debug!("creating session for {}", host);
+    trace!("create_session {}", host);
     let mut session = Session::new()?;
     session.set_tcp_stream(TcpStream::connect(host)?);
     session.handshake()?;

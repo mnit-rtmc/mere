@@ -2,8 +2,7 @@
 
 ![Mere](mere.svg)
 
-*Mere* is a low-latency directory mirroring program.  It runs on Linux using
-inotify, ssh, and bundled openssl.
+*Mere* is a low-latency directory mirroring program for Linux.
 
 Authentication happens using one of two methods:
 
@@ -11,6 +10,8 @@ Authentication happens using one of two methods:
    `/home/{username}/.ssh/id_rsa`.  This only works if the file does not require
    a password.
 2. Agent authentication, which should work when running interactively.
+
+It has minimal runtime dependencies, using bundled versions of ssh and openssl.
 
 ## Building
 

@@ -14,7 +14,7 @@ use std::net::ToSocketAddrs;
 /// Mere version from cargo manifest
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// A file mirroring tool
+/// A directory mirroring tool
 #[derive(Debug, Options)]
 struct MereOptions {
     /// Print help message
@@ -27,6 +27,9 @@ struct MereOptions {
     /// One or more source directories to mirror
     #[options(required, short = "s")]
     sources: Vec<String>,
+
+    /// Watch directories for changes using inotify
+    watch: bool,
 }
 
 /// Main function
