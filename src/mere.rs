@@ -177,17 +177,11 @@ impl PendingChanges {
                 let pos = remote.iter().position(|p| (*p).0 == path);
                 let rfile = pos.map(|i| remote.swap_remove(i));
                 let copy = rfile.is_none()
-                    || match entry.metadata() {
-                        Ok(metadata) => {
-                            let rstat = rfile.unwrap().1; // can't be none
-                            let rlen = rstat.size.unwrap_or(0);
-                            metadata.is_file() && metadata.len() != rlen
-                        }
-                        Err(e) => {
-                            error!("metadata error {:?} on {:?}", e, &path);
-                            false
-                        }
-                    };
+                    || entry.metadata().map_or(false, |metadata| {
+                        let rstat = rfile.unwrap().1; // can't be none
+                        let rlen = rstat.size.unwrap_or(0);
+                        metadata.is_file() && metadata.len() != rlen
+                    });
                 if copy {
                     try_copy_file(sftp, path.as_path())?;
                 }
@@ -221,42 +215,26 @@ fn is_path_valid(path: &Path) -> bool {
     path.is_absolute() && !is_path_hidden(path) && !is_path_temp(path)
 }
 
-/// Check whether a file path is hidden
-fn is_path_hidden(path: &Path) -> bool {
-    match path.file_name() {
-        Some(n) => match n.to_str() {
-            Some(sn) => check_hidden(sn),
-            _ => true,
-        },
-        None => true,
-    }
-}
-
 /// For some reason, vim creates temporary files called 4913
 const VIM_TEMP: &str = "4913";
 
-/// Check whether a file name is hidden
-fn check_hidden(sn: &str) -> bool {
-    sn.starts_with('.') || sn == VIM_TEMP
+/// Check whether a file path is hidden
+fn is_path_hidden(path: &Path) -> bool {
+    path.file_name().map_or(true, |n| {
+        n.to_str()
+            .map_or(true, |sn| sn.starts_with('.') || sn == VIM_TEMP)
+    })
 }
 
 /// Check whether a file path is temporary
 fn is_path_temp(path: &Path) -> bool {
-    match path.extension() {
-        Some(e) => match e.to_str() {
-            Some(se) => se.ends_with('~'),
-            _ => true,
-        },
-        None => false,
-    }
+    path.extension()
+        .map_or(false, |e| e.to_str().map_or(true, |se| se.ends_with('~')))
 }
 
 /// Check if a file exists
 fn is_file(path: &Path) -> bool {
-    match std::fs::metadata(path) {
-        Ok(metadata) => metadata.is_file(),
-        Err(_) => false,
-    }
+    std::fs::metadata(path).map_or(false, |metadata| metadata.is_file())
 }
 
 /// Create a new SSH session
@@ -326,7 +304,7 @@ fn try_copy_file(sftp: &Sftp, path: &Path) -> Result<()> {
 fn temp_file(path: &Path) -> PathBuf {
     let mut temp = PathBuf::new();
     temp.push(path.parent().unwrap());
-    temp.push(".mere.temp");
+    temp.push(".mere~");
     temp
 }
 
