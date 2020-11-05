@@ -4,11 +4,11 @@
 //
 use anyhow::{anyhow, Context, Result};
 use inotify::{Event, Inotify, WatchDescriptor, WatchMask};
-use log::{debug, error, info, trace};
-use ssh2::{OpenFlags, OpenType, RenameFlags, Session, Sftp};
+use log::{debug, info, trace};
+use ssh2::{FileStat, OpenFlags, OpenType, RenameFlags, Session, Sftp};
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
-use std::fs::File;
+use std::fs::{File, Metadata};
 use std::io;
 use std::net::TcpStream;
 use std::os::unix::fs::PermissionsExt;
@@ -19,16 +19,22 @@ use std::time::{Duration, Instant};
 /// Use 64 KB buffers
 const CAPACITY: usize = 64 * 1024;
 
-/// Pending changes to mirror
-struct PendingChanges {
-    /// Mirror destination host:port
-    host: String,
+/// Mirror paths to destination
+struct Mirror {
+    /// Destination host:port
+    destination: String,
+    /// Paths to mirror
+    paths: HashSet<PathBuf>,
+    /// User name
+    username: String,
+}
+
+/// Watcher for mirroring
+struct Watcher {
     /// Inotify watches
     inotify: Inotify,
     /// Map of watch descriptors to paths
-    dirs: HashMap<WatchDescriptor, PathBuf>,
-    /// Set of pending changes
-    changes: HashSet<PathBuf>,
+    watches: HashMap<WatchDescriptor, PathBuf>,
 }
 
 /// Get the inotify watch mask
@@ -39,106 +45,53 @@ fn watch_mask() -> WatchMask {
     mask
 }
 
-impl PendingChanges {
-    /// Create new pending changes
+impl Mirror {
+    /// Create a new mirror.
     ///
-    /// * `host` Host name (and port) to connect.
-    /// * `directories` Slice of directories.
-    fn new(host: &str, directories: &[String]) -> Result<Self> {
-        let host = host.to_string();
-        let mut inotify = Inotify::init()?;
-        let changes = HashSet::new();
-        let mask = watch_mask();
-        let mut dirs = HashMap::new();
-        for dir in directories {
-            let dir = std::fs::canonicalize(dir)
-                .with_context(|| format!("Invalid directory \"{}\"", dir))?;
-            info!("  Directory {:?}", dir);
-            let wd = inotify
-                .add_watch(&dir, mask)
-                .with_context(|| format!("Could not add watch {:?}", dir))?;
-            dirs.insert(wd, dir);
-        }
-        Ok(PendingChanges {
-            host,
-            inotify,
-            dirs,
-            changes,
+    /// * `destination` Destination host and port.
+    fn new(destination: &str) -> Result<Self> {
+        let destination = destination.to_string();
+        let paths = HashSet::new();
+        let username = whoami::username();
+        info!("Mirroring to {} as user {}", destination, username);
+        Ok(Mirror {
+            destination,
+            paths,
+            username,
         })
     }
 
-    /// Wait for watch events
-    fn wait_events(&mut self) -> Result<()> {
-        trace!("wait_events");
-        let mut buffer = [0; 1024];
-        while self.changes.is_empty() {
-            let events = self.inotify.read_events_blocking(&mut buffer)?;
-            for event in events {
-                self.add_change_event(event);
-            }
-        }
-        // Check for more events until there are none
-        loop {
-            thread::sleep(Duration::from_millis(50));
-            if !self.check_more_events(&mut buffer)? {
-                break;
-            }
-        }
-        Ok(())
-    }
-
-    /// Check for more watch events
-    fn check_more_events(&mut self, mut buffer: &mut [u8]) -> Result<bool> {
-        trace!("check_more_events");
-        let mut more = false;
-        let events = self.inotify.read_events(&mut buffer)?;
-        for event in events {
-            more |= self.add_change_event(event);
-        }
-        Ok(more)
-    }
-
-    /// Add a change from a given inotify event
-    fn add_change_event(&mut self, event: Event<&OsStr>) -> bool {
-        trace!("add_change_event: {:?}", event);
-        let dir = self.dirs.get(&event.wd);
-        if let (Some(dir), Some(name)) = (dir, event.name) {
-            let mut pb = dir.clone();
-            pb.push(name);
-            self.add_change_path(pb);
-            return true;
-        }
-        debug!("ignored event: {:?}", event);
-        false
-    }
-
-    /// Add a pending PathBuf change
-    fn add_change_path(&mut self, path: PathBuf) {
+    /// Add a path to be mirrored
+    fn add_path(&mut self, path: PathBuf) -> Result<bool> {
+        let path = std::fs::canonicalize(&path)
+            .with_context(|| format!("Invalid path {:?}", path))?;
         if is_path_valid(&path) {
             debug!("adding path: {:?}", path);
-            self.changes.insert(path);
+            self.paths.insert(path);
+            Ok(true)
         } else {
             debug!("ignoring path: {:?}", path);
+            Ok(false)
         }
     }
 
-    /// Handle an SSH session.
-    ///
-    /// * `username` Name of user to use for authentication.
-    fn handle_session(&mut self, username: &str) -> Result<()> {
-        trace!("handle_session: {}", username);
-        match create_session(&self.host) {
-            Ok(session) => {
-                authenticate_session(&session, username)?;
-                self.mirror_session(&session)?;
-            }
-            Err(e) => {
-                error!("{}, host: {}", e, self.host);
-                debug!("waiting for 10 seconds to try again");
-                thread::sleep(Duration::from_secs(10));
-            }
-        }
+    /// Copy all paths
+    fn copy_all(&mut self) -> Result<()> {
+        trace!("copy_all");
+        let session = self.session().map_err(|e| {
+            debug!("waiting for 10 seconds to try again");
+            thread::sleep(Duration::from_secs(10));
+            e
+        })?;
+        self.mirror_session(&session)?;
         Ok(())
+    }
+
+    /// Get or create a session
+    fn session(&self) -> Result<Session> {
+        let session = create_session(&self.destination)?;
+        authenticate_session(&session, &self.username)?;
+        Ok(session)
     }
 
     /// Mirror files for one session.
@@ -148,65 +101,91 @@ impl PendingChanges {
         trace!("mirror_session");
         let sftp = session.sftp()?;
         self.mirror_all(&sftp)?;
-        loop {
-            self.wait_events()?;
-            self.mirror_pending(&sftp)?;
-        }
-    }
-
-    /// Mirror all files to destination host
-    fn mirror_all(&self, sftp: &Sftp) -> Result<()> {
-        trace!("mirror_all");
-        for dir in self.dirs.values() {
-            self.mirror_directory(sftp, &dir)?;
-        }
         Ok(())
     }
 
-    /// Mirror one directory to destination host
-    fn mirror_directory(&self, sftp: &Sftp, dir: &Path) -> Result<()> {
-        trace!("mirror_directory: {:?}", dir);
-        let mut remote = sftp
-            .readdir(dir)
-            .with_context(|| format!("sftp readdir {:?}", dir))?;
-        for entry in std::fs::read_dir(dir)
-            .with_context(|| format!("read_dir {:?}", dir))?
-        {
-            if let Ok(entry) = entry {
-                let path = entry.path();
-                let pos = remote.iter().position(|p| (*p).0 == path);
-                let rfile = pos.map(|i| remote.swap_remove(i));
-                let copy = rfile.is_none()
-                    || entry.metadata().map_or(false, |metadata| {
-                        let rstat = rfile.unwrap().1; // can't be none
-                        let rlen = rstat.size.unwrap_or(0);
-                        metadata.is_file() && metadata.len() != rlen
-                    });
-                if copy {
-                    try_copy_file(sftp, path.as_path())?;
+    /// Mirror all paths.
+    ///
+    /// * `sftp` Sftp instance.
+    fn mirror_all(&mut self, sftp: &Sftp) -> Result<()> {
+        trace!("mirror_all");
+        for path in self.paths.drain() {
+            if let Ok(metadata) = std::fs::metadata(&path) {
+                if metadata.is_dir() {
+                    mirror_directory(sftp, &path)?;
+                } else if metadata.is_file() {
+                    mirror_file(sftp, &path)?;
+                } else {
+                    rm_file(sftp, &path)?;
                 }
             }
         }
-        // remove files which are not in source directory
-        for (path, _) in remote {
-            rm_file(sftp, path.as_path())?;
+        Ok(())
+    }
+}
+
+impl Watcher {
+    /// Create a new watcher.
+    fn new(mirror: &Mirror) -> Result<Self> {
+        let mut inotify = Inotify::init()?;
+        let mask = watch_mask();
+        let mut watches = HashMap::new();
+        for path in &mirror.paths {
+            let wd = inotify
+                .add_watch(&path, mask)
+                .with_context(|| format!("Could not add watch {:?}", path))?;
+            watches.insert(wd, path.clone());
+        }
+        Ok(Watcher { inotify, watches })
+    }
+
+    /// Wait for watch events
+    fn wait_events(&mut self, mirror: &mut Mirror) -> Result<()> {
+        trace!("wait_events");
+        while mirror.paths.is_empty() {
+            let mut buffer = [0; 1024];
+            let events = self.inotify.read_events_blocking(&mut buffer)?;
+            for event in events {
+                if let Some(path) = self.event_path(event) {
+                    mirror.add_path(path)?;
+                }
+            }
+        }
+        // Check for more events until there are none
+        loop {
+            thread::sleep(Duration::from_millis(50));
+            if !self.check_more_events(mirror)? {
+                break;
+            }
         }
         Ok(())
     }
 
-    /// Mirror pending changes.
-    ///
-    /// * `sftp` Sftp instance.
-    fn mirror_pending(&mut self, sftp: &Sftp) -> Result<()> {
-        trace!("mirror_pending");
-        for path in self.changes.drain() {
-            if is_file(&path) {
-                try_copy_file(sftp, &path)?;
-            } else {
-                rm_file(sftp, &path)?;
+    /// Check for more watch events
+    fn check_more_events(&mut self, mirror: &mut Mirror) -> Result<bool> {
+        trace!("check_more_events");
+        let mut buffer = [0; 1024];
+        let mut more = false;
+        let events = self.inotify.read_events(&mut buffer)?;
+        for event in events {
+            if let Some(path) = self.event_path(event) {
+                more |= mirror.add_path(path)?;
             }
         }
-        Ok(())
+        Ok(more)
+    }
+
+    /// Get path from an inotify event
+    fn event_path(&self, event: Event<&OsStr>) -> Option<PathBuf> {
+        trace!("event_path: {:?}", event);
+        let path = self.watches.get(&event.wd);
+        if let (Some(path), Some(name)) = (path, event.name) {
+            let mut path = path.clone();
+            path.push(name);
+            return Some(path);
+        }
+        debug!("ignored event: {:?}", event);
+        None
     }
 }
 
@@ -230,11 +209,6 @@ fn is_path_hidden(path: &Path) -> bool {
 fn is_path_temp(path: &Path) -> bool {
     path.extension()
         .map_or(false, |e| e.to_str().map_or(true, |se| se.ends_with('~')))
-}
-
-/// Check if a file exists
-fn is_file(path: &Path) -> bool {
-    std::fs::metadata(path).map_or(false, |metadata| metadata.is_file())
 }
 
 /// Create a new SSH session
@@ -289,11 +263,50 @@ fn authenticate_agent(session: &Session, username: &str) -> Result<()> {
     Ok(())
 }
 
-/// Try to copy a file
+/// Mirror one directory to destination host
+fn mirror_directory(sftp: &Sftp, dir: &Path) -> Result<()> {
+    trace!("mirror_directory: {:?}", dir);
+    let mut remote = sftp
+        .readdir(dir)
+        .with_context(|| format!("sftp readdir {:?}", dir))?;
+    for entry in
+        std::fs::read_dir(dir).with_context(|| format!("read_dir {:?}", dir))?
+    {
+        if let Ok(entry) = entry {
+            if let Ok(metadata) = entry.metadata() {
+                let path = entry.path();
+                let pos = remote.iter().position(|p| (*p).0 == path);
+                let rfile = pos.map(|i| remote.swap_remove(i));
+                if should_mirror(&metadata, rfile) {
+                    mirror_file(sftp, &path)?;
+                }
+            }
+        }
+    }
+    // remove files which are not in source directory
+    for (path, _) in remote {
+        rm_file(sftp, &path)?;
+    }
+    Ok(())
+}
+
+/// Check if a file should be mirrored
+fn should_mirror(
+    metadata: &Metadata,
+    rfile: Option<(PathBuf, FileStat)>,
+) -> bool {
+    rfile.is_none() || {
+        let rstat = rfile.unwrap().1; // can't be none
+        let rlen = rstat.size.unwrap_or(0);
+        metadata.is_file() && metadata.len() != rlen
+    }
+}
+
+/// Mirror a file.
 ///
 /// * `sftp` Sftp instance.
 /// * `path` Path to file.
-fn try_copy_file(sftp: &Sftp, path: &Path) -> Result<()> {
+fn mirror_file(sftp: &Sftp, path: &Path) -> Result<()> {
     let t = Instant::now();
     copy_file(sftp, path).with_context(|| format!("copy failed {:?}", path))?;
     info!("copied {:?} in {:?}", path, t.elapsed());
@@ -353,10 +366,9 @@ fn copy_file(sftp: &Sftp, path: &Path) -> Result<()> {
 /// * `path` Path to file.
 fn rm_file(sftp: &Sftp, path: &Path) -> Result<()> {
     trace!("rm_file {:?}", path);
-    let t = Instant::now();
     sftp.unlink(path)
         .with_context(|| format!("remove failed {:?}", path))?;
-    info!("removed {:?} in {:?}", path, t.elapsed());
+    info!("removed {:?}", path);
     Ok(())
 }
 
@@ -365,11 +377,15 @@ fn rm_file(sftp: &Sftp, path: &Path) -> Result<()> {
 /// * `dest` Destination host.
 /// * `sources` Source directories to mirror.
 pub fn mirror_files(dest: &str, sources: &[String]) -> Result<()> {
-    let username = whoami::username();
-    info!("Mirroring to {} as user {}", dest, username);
-    let mut pc = PendingChanges::new(dest, sources)?;
+    trace!("mirror_files");
+    let mut mirror = Mirror::new(dest)?;
+    for dir in sources {
+        mirror.add_path(dir.into())?;
+    }
+    let mut watcher = Watcher::new(&mirror)?;
+    mirror.copy_all()?;
     loop {
-        pc.wait_events()?;
-        pc.handle_session(&username)?;
+        watcher.wait_events(&mut mirror)?;
+        mirror.copy_all()?;
     }
 }
