@@ -6,7 +6,7 @@ StartLimitIntervalSec=0
 Environment=RUST_LOG=warn
 ExecStart=/usr/local/bin/mere -d {destination} -s {sources}
 Restart=always
-RestartSec=2
+RestartSec=10
 User=tms
 
 [Install]

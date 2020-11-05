@@ -78,43 +78,17 @@ impl Mirror {
     /// Copy all paths
     pub fn copy_all(&mut self) -> Result<()> {
         trace!("copy_all");
-        let session = self.session().map_err(|e| {
-            debug!("waiting for 10 seconds to try again");
-            thread::sleep(Duration::from_secs(10));
-            e
-        })?;
-        self.mirror_session(&session)
-    }
-
-    /// Get or create a session
-    fn session(&self) -> Result<Session> {
         let session = create_session(&self.destination)?;
         authenticate_session(&session, &self.username)?;
-        Ok(session)
-    }
-
-    /// Mirror files for one session.
-    ///
-    /// * `session` SSH session.
-    fn mirror_session(&mut self, session: &Session) -> Result<()> {
-        trace!("mirror_session");
-        let sftp = session.sftp()?;
-        self.mirror_all(&sftp)
-    }
-
-    /// Mirror all paths.
-    ///
-    /// * `sftp` Sftp instance.
-    fn mirror_all(&mut self, sftp: &Sftp) -> Result<()> {
-        trace!("mirror_all");
+        let sftp = session.sftp().context("creating sftp")?;
         for path in self.paths.drain() {
             if let Ok(metadata) = std::fs::metadata(&path) {
                 if metadata.is_dir() {
-                    mirror_directory(sftp, &path)?;
+                    mirror_directory(&sftp, &path)?;
                 } else if metadata.is_file() {
-                    mirror_file(sftp, &path)?;
+                    mirror_file(&sftp, &path)?;
                 } else {
-                    rm_file(sftp, &path)?;
+                    rm_file(&sftp, &path)?;
                 }
             }
         }
@@ -210,13 +184,18 @@ fn is_path_temp(path: &Path) -> bool {
 }
 
 /// Create a new SSH session
-///
-/// * `host` Host name (and port) to connect.
-fn create_session(host: &str) -> Result<Session> {
-    trace!("create_session {}", host);
-    let mut session = Session::new()?;
-    session.set_tcp_stream(TcpStream::connect(host)?);
-    session.handshake()?;
+fn create_session(destination: &str) -> Result<Session> {
+    trace!("create_session {}", destination);
+    let mut session = Session::new()
+        .with_context(|| format!("creating session to {}", destination))?;
+    session.set_compress(true);
+    session.set_blocking(true);
+    session.set_timeout(5000); // 5 seconds
+    session.set_tcp_stream(
+        TcpStream::connect(destination)
+            .with_context(|| format!("connecting to {}", destination))?,
+    );
+    session.handshake().context("ssh session handshake")?;
     Ok(session)
 }
 
