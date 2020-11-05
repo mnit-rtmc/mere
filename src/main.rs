@@ -6,7 +6,8 @@
 
 mod mere;
 
-use anyhow::Context;
+use crate::mere::{Mirror, Watcher};
+use anyhow::{Context, Result};
 use gumdrop::Options;
 use std::env;
 use std::net::ToSocketAddrs;
@@ -38,7 +39,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let opts = MereOptions::parse_args_default_or_exit();
     env_logger::builder().format_timestamp(None).init();
     let dest = socket_addr(&opts.destination)?;
-    Ok(mere::mirror_files(&dest, &opts.sources)?)
+    Ok(mirror_files(opts.watch, &dest, &opts.sources)?)
 }
 
 /// Validate destination host to parse as socket address
@@ -50,4 +51,22 @@ fn socket_addr(dest: &str) -> anyhow::Result<String> {
             .with_context(|| format!("Invalid destination {:?}", dest))?;
     }
     Ok(addr)
+}
+
+/// Mirror files to another host.
+fn mirror_files(watch: bool, dest: &str, sources: &[String]) -> Result<()> {
+    let mut mirror = Mirror::new(dest)?;
+    for dir in sources {
+        mirror.add_path(dir.into())?;
+    }
+    if watch {
+        let mut watcher = Watcher::new(&mirror)?;
+        mirror.copy_all()?;
+        loop {
+            watcher.wait_events(&mut mirror)?;
+            mirror.copy_all()?;
+        }
+    } else {
+        mirror.copy_all()
+    }
 }

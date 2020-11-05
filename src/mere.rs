@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 const CAPACITY: usize = 64 * 1024;
 
 /// Mirror paths to destination
-struct Mirror {
+pub struct Mirror {
     /// Destination host:port
     destination: String,
     /// Paths to mirror
@@ -30,7 +30,7 @@ struct Mirror {
 }
 
 /// Watcher for mirroring
-struct Watcher {
+pub struct Watcher {
     /// Inotify watches
     inotify: Inotify,
     /// Map of watch descriptors to paths
@@ -49,7 +49,7 @@ impl Mirror {
     /// Create a new mirror.
     ///
     /// * `destination` Destination host and port.
-    fn new(destination: &str) -> Result<Self> {
+    pub fn new(destination: &str) -> Result<Self> {
         let destination = destination.to_string();
         let paths = HashSet::new();
         let username = whoami::username();
@@ -62,7 +62,7 @@ impl Mirror {
     }
 
     /// Add a path to be mirrored
-    fn add_path(&mut self, path: PathBuf) -> Result<bool> {
+    pub fn add_path(&mut self, path: PathBuf) -> Result<bool> {
         let path = std::fs::canonicalize(&path)
             .with_context(|| format!("Invalid path {:?}", path))?;
         if is_path_valid(&path) {
@@ -76,15 +76,14 @@ impl Mirror {
     }
 
     /// Copy all paths
-    fn copy_all(&mut self) -> Result<()> {
+    pub fn copy_all(&mut self) -> Result<()> {
         trace!("copy_all");
         let session = self.session().map_err(|e| {
             debug!("waiting for 10 seconds to try again");
             thread::sleep(Duration::from_secs(10));
             e
         })?;
-        self.mirror_session(&session)?;
-        Ok(())
+        self.mirror_session(&session)
     }
 
     /// Get or create a session
@@ -100,8 +99,7 @@ impl Mirror {
     fn mirror_session(&mut self, session: &Session) -> Result<()> {
         trace!("mirror_session");
         let sftp = session.sftp()?;
-        self.mirror_all(&sftp)?;
-        Ok(())
+        self.mirror_all(&sftp)
     }
 
     /// Mirror all paths.
@@ -126,7 +124,7 @@ impl Mirror {
 
 impl Watcher {
     /// Create a new watcher.
-    fn new(mirror: &Mirror) -> Result<Self> {
+    pub fn new(mirror: &Mirror) -> Result<Self> {
         let mut inotify = Inotify::init()?;
         let mask = watch_mask();
         let mut watches = HashMap::new();
@@ -140,7 +138,7 @@ impl Watcher {
     }
 
     /// Wait for watch events
-    fn wait_events(&mut self, mirror: &mut Mirror) -> Result<()> {
+    pub fn wait_events(&mut self, mirror: &mut Mirror) -> Result<()> {
         trace!("wait_events");
         while mirror.paths.is_empty() {
             let mut buffer = [0; 1024];
@@ -370,22 +368,4 @@ fn rm_file(sftp: &Sftp, path: &Path) -> Result<()> {
         .with_context(|| format!("remove failed {:?}", path))?;
     info!("removed {:?}", path);
     Ok(())
-}
-
-/// Mirror files to another host.
-///
-/// * `dest` Destination host.
-/// * `sources` Source directories to mirror.
-pub fn mirror_files(dest: &str, sources: &[String]) -> Result<()> {
-    trace!("mirror_files");
-    let mut mirror = Mirror::new(dest)?;
-    for dir in sources {
-        mirror.add_path(dir.into())?;
-    }
-    let mut watcher = Watcher::new(&mirror)?;
-    mirror.copy_all()?;
-    loop {
-        watcher.wait_events(&mut mirror)?;
-        mirror.copy_all()?;
-    }
 }
