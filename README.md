@@ -23,12 +23,21 @@ cargo build --release
 
 ## Running
 
-You must specify the destination host as well as one or more source directories
-to mirror.
+```
+Usage: ./target/release/mere [OPTIONS]
 
+A directory mirroring tool
+
+
+Optional arguments:
+  -h, --help             Print help message
+  -d, --destination DESTINATION
+                         Destination: <host_name> or <host_name>:<port>
+  -s, --sources SOURCES  One or more source directories to mirror
+  -w, --watch            Watch directories for changes using inotify
 ```
-./target/release/mere -d {dst host} -s {dir 0} ... {dir N}
-```
+
+The `--destination` and `--sources` arguments are required.
 
 ## Running as a systemd Service
 
