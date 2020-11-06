@@ -37,7 +37,10 @@ Optional arguments:
   -w, --watch      Watch paths for changes using inotify
 ```
 
-The `--destination` and at least one `--path` argument are required.
+* `--destination` is required
+* One or more `--path` arguments are required
+* `--watch` uses inotify to watch each specified path, mirroring files which are
+  _closed after writing_, _deleted_ or _moved_.
 
 ## Running as a systemd Service
 
