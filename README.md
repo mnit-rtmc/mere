@@ -2,7 +2,7 @@
 
 ![Mere](mere.svg)
 
-*Mere* is a low-latency directory mirroring program for Linux.
+*Mere* is a real-time file mirroring tool for Linux.
 
 Authentication happens using one of two methods:
 
@@ -40,7 +40,7 @@ Optional arguments:
 * `--destination` is required
 * One or more `--path` arguments are required
 * `--watch` uses inotify to watch each specified path, mirroring files which are
-  _closed after writing_, _deleted_ or _moved_.
+  **closed after writing**, **deleted** or **moved**.
 
 ## Running as a systemd Service
 
