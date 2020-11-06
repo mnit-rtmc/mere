@@ -260,7 +260,7 @@ fn mirror_directory(sftp: &Sftp, dir: &Path) -> Result<()> {
             }
         }
     }
-    // remove files which are not in source directory
+    // remove files which are not in the local directory
     for (path, _) in remote {
         rm_file(sftp, &path)?;
     }

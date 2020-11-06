@@ -26,18 +26,18 @@ cargo build --release
 ```
 Usage: ./target/release/mere [OPTIONS]
 
-A directory mirroring tool
+A real-time file mirroring tool
 
 
 Optional arguments:
-  -h, --help             Print help message
+  -h, --help       Print help message
   -d, --destination DESTINATION
-                         Destination: <host_name> or <host_name>:<port>
-  -s, --sources SOURCES  One or more source directories to mirror
-  -w, --watch            Watch directories for changes using inotify
+                   Destination: <host> or <host>:<port>
+  -p, --path PATH  Directory or file path (can be used multiple times)
+  -w, --watch      Watch paths for changes using inotify
 ```
 
-The `--destination` and `--sources` arguments are required.
+The `--destination` and at least one `--path` argument are required.
 
 ## Running as a systemd Service
 
@@ -49,7 +49,7 @@ cp ./mere.service /etc/systemd/system/
 ```
 
 * Edit `/etc/systemd/system/mere.service`
-* Replace {destination} and {sources} on `ExecStart=/usr/local/bin/mere` line
+* Replace {destination} and {path} on `ExecStart=/usr/local/bin/mere` line
 
 ```
 systemctl enable mere
