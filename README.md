@@ -4,6 +4,9 @@
 
 *Mere* is a real-time file mirroring tool for Linux.
 
+It has minimal runtime dependencies, using bundled versions of `libssh2` and
+`openssl`.
+
 Authentication happens using one of two methods:
 
 1. Public key authentication using a private key from
@@ -11,11 +14,9 @@ Authentication happens using one of two methods:
    a password.
 2. Agent authentication, which should work when running interactively.
 
-It has minimal runtime dependencies, using bundled versions of ssh and openssl.
-
 ## Building
 
-With cargo:
+With `cargo`:
 
 ```
 cargo build --release
@@ -40,7 +41,7 @@ Optional arguments:
 * `--destination` is required
 * One or more `--path` arguments are required
 * `--watch` uses inotify to watch each specified path, mirroring files which are
-  **closed after writing**, **deleted** or **moved**.
+  **closed** after writing, **deleted** or **moved**.
 
 ## Running as a systemd Service
 
