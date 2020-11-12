@@ -8,7 +8,7 @@ use log::{debug, info, trace};
 use ssh2::{FileStat, OpenFlags, OpenType, RenameFlags, Session, Sftp};
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
-use std::fs::{DirEntry, File, read_dir};
+use std::fs::{read_dir, DirEntry, File};
 use std::io;
 use std::net::TcpStream;
 use std::os::unix::fs::PermissionsExt;
