@@ -8,7 +8,7 @@ use log::{debug, info, trace};
 use ssh2::{FileStat, OpenFlags, OpenType, RenameFlags, Session, Sftp};
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
-use std::fs::{File, Metadata};
+use std::fs::{DirEntry, File};
 use std::io;
 use std::net::TcpStream;
 use std::os::unix::fs::PermissionsExt;
@@ -249,14 +249,11 @@ fn mirror_directory(sftp: &Sftp, dir: &Path) -> Result<()> {
     for entry in
         std::fs::read_dir(dir).with_context(|| format!("read_dir {:?}", dir))?
     {
-        if let Ok(entry) = entry {
-            if let Ok(metadata) = entry.metadata() {
-                let path = entry.path();
-                let pos = remote.iter().position(|p| (*p).0 == path);
-                let rfile = pos.map(|i| remote.swap_remove(i));
-                if should_mirror(&metadata, rfile) {
-                    mirror_file(sftp, &path)?;
-                }
+        if let Some((path, len)) = dir_entry_path_len(&entry) {
+            let pos = remote.iter().position(|p| (*p).0 == path);
+            let rfile = pos.map(|i| remote.swap_remove(i));
+            if should_mirror(rfile, len) {
+                mirror_file(sftp, &path)?;
             }
         }
     }
@@ -269,15 +266,27 @@ fn mirror_directory(sftp: &Sftp, dir: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Get the path and length of a directory entry file
+fn dir_entry_path_len(entry: &std::io::Result<DirEntry>) -> Option<(PathBuf, u64)> {
+    if let Ok(entry) = entry {
+        if let Ok(metadata) = entry.metadata() {
+            if metadata.is_file() {
+                return Some((entry.path(), metadata.len()));
+            }
+        }
+    }
+    None
+}
+
 /// Check if a file should be mirrored
 fn should_mirror(
-    metadata: &Metadata,
     rfile: Option<(PathBuf, FileStat)>,
+    len: u64,
 ) -> bool {
     rfile.is_none() || {
         let rstat = rfile.unwrap().1; // can't be none
         let rlen = rstat.size.unwrap_or(0);
-        metadata.is_file() && metadata.len() != rlen
+        len != rlen
     }
 }
 
