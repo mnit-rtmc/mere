@@ -84,14 +84,15 @@ impl Mirror {
         authenticate_session(&session, &self.username)?;
         let sftp = session.sftp().context("creating sftp")?;
         for path in self.paths.drain() {
-            if let Ok(metadata) = std::fs::metadata(&path) {
-                if metadata.is_dir() {
-                    mirror_directory(&sftp, &path)?;
-                } else if metadata.is_file() {
-                    mirror_file(&sftp, &path)?;
-                } else {
-                    rm_file(&sftp, &path)?;
+            match std::fs::metadata(&path) {
+                Ok(metadata) => {
+                    if metadata.is_dir() {
+                        mirror_directory(&sftp, &path)?;
+                    } else if metadata.is_file() {
+                        mirror_file(&sftp, &path)?;
+                    }
                 }
+                Err(_) => rm_file(&sftp, &path)?,
             }
         }
         Ok(())
@@ -261,7 +262,7 @@ fn mirror_directory(sftp: &Sftp, dir: &Path) -> Result<()> {
     }
     // remove files which are not in the local directory
     for (path, _) in remote {
-        if path != temp_file(&path) {
+        if is_path_valid(&path) {
             rm_file(sftp, &path)?;
         }
     }
