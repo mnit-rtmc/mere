@@ -63,9 +63,8 @@ impl Mirror {
 
     /// Add a path to be mirrored
     pub fn add_path(&mut self, path: PathBuf) -> Result<bool> {
-        let path = std::fs::canonicalize(&path)
-            .with_context(|| format!("Invalid path {:?}", path))?;
         if is_path_valid(&path) {
+            let path = std::fs::canonicalize(&path).unwrap_or(path);
             debug!("adding path: {:?}", path);
             self.paths.insert(path);
             Ok(true)
@@ -77,7 +76,10 @@ impl Mirror {
 
     /// Copy all paths
     pub fn copy_all(&mut self) -> Result<()> {
-        trace!("copy_all");
+        trace!("copy_all {}", self.paths.len());
+        if self.paths.is_empty() {
+            return Ok(())
+        }
         let session = create_session(&self.destination)?;
         authenticate_session(&session, &self.username)?;
         let sftp = session.sftp().context("creating sftp")?;
