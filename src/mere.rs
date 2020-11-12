@@ -78,7 +78,7 @@ impl Mirror {
     pub fn copy_all(&mut self) -> Result<()> {
         trace!("copy_all {}", self.paths.len());
         if self.paths.is_empty() {
-            return Ok(())
+            return Ok(());
         }
         let session = create_session(&self.destination)?;
         authenticate_session(&session, &self.username)?;
@@ -251,7 +251,7 @@ fn mirror_directory(sftp: &Sftp, dir: &Path) -> Result<()> {
     for entry in
         std::fs::read_dir(dir).with_context(|| format!("read_dir {:?}", dir))?
     {
-        if let Some((path, len)) = dir_entry_path_len(&entry) {
+        if let Some((path, len)) = path_len(entry) {
             let pos = remote.iter().position(|p| (*p).0 == path);
             let rfile = pos.map(|i| remote.swap_remove(i));
             if should_mirror(rfile, len) {
@@ -269,7 +269,7 @@ fn mirror_directory(sftp: &Sftp, dir: &Path) -> Result<()> {
 }
 
 /// Get the path and length of a directory entry file
-fn dir_entry_path_len(entry: &std::io::Result<DirEntry>) -> Option<(PathBuf, u64)> {
+fn path_len(entry: std::io::Result<DirEntry>) -> Option<(PathBuf, u64)> {
     if let Ok(entry) = entry {
         if let Ok(metadata) = entry.metadata() {
             if metadata.is_file() {
@@ -281,10 +281,7 @@ fn dir_entry_path_len(entry: &std::io::Result<DirEntry>) -> Option<(PathBuf, u64
 }
 
 /// Check if a file should be mirrored
-fn should_mirror(
-    rfile: Option<(PathBuf, FileStat)>,
-    len: u64,
-) -> bool {
+fn should_mirror(rfile: Option<(PathBuf, FileStat)>, len: u64) -> bool {
     rfile.is_none() || {
         let rstat = rfile.unwrap().1; // can't be none
         let rlen = rstat.size.unwrap_or(0);
