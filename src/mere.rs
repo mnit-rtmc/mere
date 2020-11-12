@@ -8,7 +8,7 @@ use log::{debug, info, trace};
 use ssh2::{FileStat, OpenFlags, OpenType, RenameFlags, Session, Sftp};
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
-use std::fs::{DirEntry, File};
+use std::fs::{DirEntry, File, read_dir};
 use std::io;
 use std::net::TcpStream;
 use std::os::unix::fs::PermissionsExt;
@@ -246,12 +246,8 @@ fn authenticate_agent(session: &Session, username: &str) -> Result<()> {
 /// Mirror one directory to destination host
 fn mirror_directory(sftp: &Sftp, dir: &Path) -> Result<()> {
     trace!("mirror_directory: {:?}", dir);
-    let mut remote = sftp
-        .readdir(dir)
-        .with_context(|| format!("sftp readdir {:?}", dir))?;
-    for entry in
-        std::fs::read_dir(dir).with_context(|| format!("read_dir {:?}", dir))?
-    {
+    let mut remote = sftp_read_dir(sftp, dir)?;
+    for entry in read_dir(dir).with_context(|| format!("read_dir {:?}", dir))? {
         if let Some((path, len)) = path_len(entry) {
             let pos = remote.iter().position(|p| (*p).0 == path);
             let rfile = pos.map(|i| remote.swap_remove(i));
@@ -267,6 +263,15 @@ fn mirror_directory(sftp: &Sftp, dir: &Path) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Read remote directory with sftp
+fn sftp_read_dir(sftp: &Sftp, dir: &Path) -> Result<Vec<(PathBuf, FileStat)>> {
+    let mut remote = sftp
+        .readdir(dir)
+        .with_context(|| format!("sftp readdir {:?}", dir))?;
+    remote.retain(|path_stat| path_stat.1.is_file());
+    Ok(remote)
 }
 
 /// Get the path and length of a directory entry file
