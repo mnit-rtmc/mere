@@ -262,7 +262,9 @@ fn mirror_directory(sftp: &Sftp, dir: &Path) -> Result<()> {
     }
     // remove files which are not in the local directory
     for (path, _) in remote {
-        rm_file(sftp, &path)?;
+        if path != temp_file(&path) {
+            rm_file(sftp, &path)?;
+        }
     }
     Ok(())
 }
@@ -285,7 +287,7 @@ fn should_mirror(
 /// * `path` Path to file.
 fn mirror_file(sftp: &Sftp, path: &Path) -> Result<()> {
     let t = Instant::now();
-    copy_file(sftp, path).with_context(|| format!("copy failed {:?}", path))?;
+    copy_file(sftp, path)?;
     info!("copied {:?} in {:?}", path, t.elapsed());
     Ok(())
 }
@@ -319,22 +321,46 @@ fn copy_file(sftp: &Sftp, path: &Path) -> Result<()> {
     let len = metadata.len();
     // Mask off higher mode bits to avoid a "file corrupt" error
     let mode = (metadata.permissions().mode() & 0o7777) as i32;
-    let dst = sftp.open_mode(
-        temp.as_path(),
-        OpenFlags::TRUNCATE,
-        mode,
-        OpenType::File,
-    )?;
-    let mut src = io::BufReader::with_capacity(CAPACITY, src);
-    let mut dst = io::BufWriter::with_capacity(CAPACITY, dst);
-    let copied = io::copy(&mut src, &mut dst)?;
-    drop(dst);
+    let dst = sftp
+        .open_mode(
+            &temp,
+            OpenFlags::WRITE | OpenFlags::TRUNCATE,
+            mode,
+            OpenType::File,
+        )
+        .with_context(|| format!("sftp open_mode {:?}", temp))?;
+    let copied = {
+        let mut src = io::BufReader::with_capacity(CAPACITY, src);
+        let mut dst = io::BufWriter::with_capacity(CAPACITY, dst);
+        io::copy(&mut src, &mut dst)
+            .with_context(|| format!("sftp copy {:?}", path))?
+    };
     if copied == len {
-        sftp.rename(temp.as_path(), path, rename_flags())?;
-        Ok(())
+        rename_file(sftp, &temp, path)
     } else {
         Err(anyhow!("copy length wrong: {} != {}", copied, len))
     }
+}
+
+/// Rename a remote sftp file
+fn rename_file(sftp: &Sftp, src: &Path, dst: &Path) -> Result<()> {
+    trace!("rename_file {:?} {:?}", src, dst);
+    match sftp.rename(&src, dst, rename_flags()) {
+        Ok(()) => Ok(()),
+        Err(e) => {
+            // Some servers return an SFTP protocol error (-31) on rename if the
+            // destination file exists.  In this case, remove it and try again.
+            if e.code() == -31 {
+                rm_file(sftp, dst)?;
+                sftp.rename(&src, dst, rename_flags())?;
+                Ok(())
+            } else {
+                Err(e)
+            }
+        }
+    }
+    .with_context(|| format!("sftp rename {:?} {:?}", src, dst))?;
+    Ok(())
 }
 
 /// Remove a remote file.
