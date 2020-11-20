@@ -193,7 +193,7 @@ fn create_session(destination: &str) -> Result<Session> {
         .with_context(|| format!("creating session to {}", destination))?;
     session.set_compress(true);
     session.set_blocking(true);
-    session.set_timeout(5000); // 5 seconds
+    session.set_timeout(8000); // 8 seconds
     session.set_tcp_stream(
         TcpStream::connect(destination)
             .with_context(|| format!("connecting to {}", destination))?,
