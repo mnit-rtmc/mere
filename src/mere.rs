@@ -77,6 +77,7 @@ impl Mirror {
     /// Copy all paths
     pub fn copy_all(&mut self) -> Result<()> {
         trace!("copy_all {}", self.paths.len());
+        self.paths.retain(|path| is_path_valid(&path));
         if self.paths.is_empty() {
             return Ok(());
         }
@@ -92,7 +93,7 @@ impl Mirror {
                         mirror_file(&sftp, &path)?;
                     }
                 }
-                Err(_) => rm_file(&sftp, &path)?,
+                Err(_) => rm_file(&sftp, &path).context("deleting file")?,
             }
         }
         Ok(())
