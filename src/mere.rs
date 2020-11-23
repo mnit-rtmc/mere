@@ -183,8 +183,7 @@ fn is_path_hidden(path: &Path) -> bool {
 
 /// Check whether a file path is temporary
 fn is_path_temp(path: &Path) -> bool {
-    path.extension()
-        .map_or(false, |e| e.to_str().map_or(true, |se| se.ends_with('~')))
+    path.to_string_lossy().ends_with('~')
 }
 
 /// Create a new SSH session
