@@ -251,7 +251,7 @@ fn mirror_directory(sftp: &Sftp, dir: &Path) -> Result<()> {
         if let Some((path, len)) = path_len(entry) {
             let pos = remote.iter().position(|p| (*p).0 == path);
             let rfile = pos.map(|i| remote.swap_remove(i));
-            if should_mirror(rfile, len) {
+            if is_path_valid(&path) && should_mirror(rfile, len) {
                 mirror_file(sftp, &path)?;
             }
         }
