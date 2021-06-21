@@ -1,7 +1,6 @@
 [package]
 name = "mere"
-version = "0.2.4"
-authors = ["Douglas Lau <doug.lau@state.mn.us>"]
+version = "0.3.0"
 description = "A real-time file mirroring tool"
 license = "MIT OR Apache-2.0"
 homepage = "https://github.com/mnit-rtmc/mere"
@@ -13,17 +12,17 @@ edition = "2018"
 anyhow = "1.0"
 gumdrop = "0.8"
 log = "0.4"
-whoami = "0.9"
+whoami = "1"
 
 [dependencies.inotify]
-version = "0.8"
+version = "0.9"
 default_features = false
 
 [dependencies.ssh2]
-version = "0.8"
+version = "0.9"
 features = ["vendored-openssl"]
 
 [dependencies.env_logger]
-version = "0.7"
+version = "0.8"
 default_features = false
 features = ["atty", "humantime"]

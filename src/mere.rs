@@ -1,11 +1,13 @@
 // mere.rs    Directory mirroring service
 //
-// Copyright (C) 2018-2020  Minnesota Department of Transportation
+// Copyright (C) 2018-2021  Minnesota Department of Transportation
 //
 use anyhow::{anyhow, Context, Result};
 use inotify::{Event, Inotify, WatchDescriptor, WatchMask};
 use log::{debug, info, trace};
-use ssh2::{FileStat, OpenFlags, OpenType, RenameFlags, Session, Sftp};
+use ssh2::{
+    ErrorCode, FileStat, OpenFlags, OpenType, RenameFlags, Session, Sftp,
+};
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 use std::fs::{read_dir, DirEntry, File};
@@ -364,7 +366,7 @@ fn rename_file(sftp: &Sftp, src: &Path, dst: &Path) -> Result<()> {
         Err(e) => {
             // Some servers return an SFTP protocol error (-31) on rename if the
             // destination file exists.  In this case, remove it and try again.
-            if e.code() == -31 {
+            if e.code() == ErrorCode::SFTP(-31) {
                 rm_file(sftp, dst)?;
                 sftp.rename(&src, dst, rename_flags())?;
                 Ok(())
