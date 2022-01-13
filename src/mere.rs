@@ -1,6 +1,6 @@
 // mere.rs    Directory mirroring service
 //
-// Copyright (C) 2018-2021  Minnesota Department of Transportation
+// Copyright (C) 2018-2022  Minnesota Department of Transportation
 //
 use anyhow::{anyhow, Context, Result};
 use inotify::{Event, Inotify, WatchDescriptor, WatchMask};
@@ -79,7 +79,7 @@ impl Mirror {
     /// Copy all paths
     pub fn copy_all(&mut self) -> Result<()> {
         trace!("copy_all {}", self.paths.len());
-        self.paths.retain(|path| is_path_valid(&path));
+        self.paths.retain(|path| is_path_valid(path));
         if self.paths.is_empty() {
             return Ok(());
         }
@@ -361,14 +361,14 @@ fn copy_file(sftp: &Sftp, path: &Path) -> Result<()> {
 /// Rename a remote sftp file
 fn rename_file(sftp: &Sftp, src: &Path, dst: &Path) -> Result<()> {
     trace!("rename_file {:?} {:?}", src, dst);
-    match sftp.rename(&src, dst, rename_flags()) {
+    match sftp.rename(src, dst, rename_flags()) {
         Ok(()) => Ok(()),
         Err(e) => {
             // Some servers return an SFTP protocol error (-31) on rename if the
             // destination file exists.  In this case, remove it and try again.
             if e.code() == ErrorCode::SFTP(-31) {
                 rm_file(sftp, dst)?;
-                sftp.rename(&src, dst, rename_flags())?;
+                sftp.rename(src, dst, rename_flags())?;
                 Ok(())
             } else {
                 Err(e)
