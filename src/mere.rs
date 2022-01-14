@@ -169,7 +169,7 @@ impl Watcher {
 
 /// Check if a path is valid
 fn is_path_valid(path: &Path) -> bool {
-    path.is_absolute() && !is_path_hidden(path) && !is_path_temp(path)
+    path.is_absolute() && !is_path_hidden(path) && !is_path_backup(path)
 }
 
 /// For some reason, vim creates temporary files called 4913
@@ -183,8 +183,8 @@ fn is_path_hidden(path: &Path) -> bool {
     })
 }
 
-/// Check whether a file path is temporary
-fn is_path_temp(path: &Path) -> bool {
+/// Check whether a file path is a backup
+fn is_path_backup(path: &Path) -> bool {
     path.to_string_lossy().ends_with('~')
 }
 
@@ -308,12 +308,12 @@ fn mirror_file(sftp: &Sftp, path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Create a temp file path
-fn temp_file(path: &Path) -> PathBuf {
-    let mut temp = PathBuf::new();
-    temp.push(path.parent().unwrap());
-    temp.push(".mere~");
-    temp
+/// Create a backup file path
+fn backup_file(path: &Path) -> PathBuf {
+    let mut backup = PathBuf::new();
+    backup.push(path.parent().unwrap());
+    backup.push(".mere~");
+    backup
 }
 
 /// Get sftp rename flags
@@ -331,7 +331,7 @@ fn rename_flags() -> Option<RenameFlags> {
 /// * `path` Path to file.
 fn copy_file(sftp: &Sftp, path: &Path) -> Result<()> {
     trace!("copy_file {:?}", path);
-    let temp = temp_file(path);
+    let backup = backup_file(path);
     let src = File::open(path)?;
     let metadata = src.metadata()?;
     let len = metadata.len();
@@ -339,12 +339,12 @@ fn copy_file(sftp: &Sftp, path: &Path) -> Result<()> {
     let mode = (metadata.permissions().mode() & 0o7777) as i32;
     let dst = sftp
         .open_mode(
-            &temp,
+            &backup,
             OpenFlags::WRITE | OpenFlags::TRUNCATE,
             mode,
             OpenType::File,
         )
-        .with_context(|| format!("sftp open_mode {:?}", temp))?;
+        .with_context(|| format!("sftp open_mode {:?}", backup))?;
     let copied = {
         let mut src = io::BufReader::with_capacity(CAPACITY, src);
         let mut dst = io::BufWriter::with_capacity(CAPACITY, dst);
@@ -352,7 +352,7 @@ fn copy_file(sftp: &Sftp, path: &Path) -> Result<()> {
             .with_context(|| format!("sftp copy {:?}", path))?
     };
     if copied == len {
-        rename_file(sftp, &temp, path)
+        rename_file(sftp, &backup, path)
     } else {
         Err(anyhow!("copy length wrong: {} != {}", copied, len))
     }
