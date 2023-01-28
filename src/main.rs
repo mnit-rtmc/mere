@@ -1,6 +1,6 @@
 // main.rs    Directory mirroring service
 //
-// Copyright (C)  2018-2020  Minnesota Department of Transportation
+// Copyright (C)  2018-2023  Minnesota Department of Transportation
 //
 #![forbid(unsafe_code)]
 
@@ -35,7 +35,7 @@ struct MereOptions {
 
 /// Main function
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("mere v{}", VERSION);
+    println!("mere v{VERSION}");
     let opts = MereOptions::parse_args_default_or_exit();
     env_logger::builder().format_timestamp(None).init();
     let dest = socket_addr(&opts.destination)?;
@@ -48,7 +48,7 @@ fn socket_addr(dest: &str) -> anyhow::Result<String> {
     if addr.to_socket_addrs().is_err() {
         addr.push_str(":22");
         addr.to_socket_addrs()
-            .with_context(|| format!("Invalid destination {:?}", dest))?;
+            .with_context(|| format!("Invalid destination {dest:?}"))?;
     }
     Ok(addr)
 }

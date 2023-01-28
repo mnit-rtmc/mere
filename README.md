@@ -16,6 +16,8 @@ Authentication happens using one of two methods:
 
 ## Building
 
+First, install Perl modules: FindBin and File/Compare (required for OpenSSL)
+
 With `cargo`:
 
 ```

@@ -1,6 +1,6 @@
 // mere.rs    Directory mirroring service
 //
-// Copyright (C) 2018-2022  Minnesota Department of Transportation
+// Copyright (C) 2018-2023  Minnesota Department of Transportation
 //
 use anyhow::{anyhow, Context, Result};
 use inotify::{Event, Inotify, WatchDescriptor, WatchMask};
@@ -110,8 +110,8 @@ impl Watcher {
         let mut watches = HashMap::new();
         for path in &mirror.paths {
             let wd = inotify
-                .add_watch(&path, mask)
-                .with_context(|| format!("Could not add watch {:?}", path))?;
+                .add_watch(path, mask)
+                .with_context(|| format!("Could not add watch {path:?}"))?;
             watches.insert(wd, path.clone());
         }
         Ok(Watcher { inotify, watches })
@@ -192,13 +192,13 @@ fn is_path_backup(path: &Path) -> bool {
 fn create_session(destination: &str) -> Result<Session> {
     trace!("create_session {}", destination);
     let mut session = Session::new()
-        .with_context(|| format!("creating session to {}", destination))?;
+        .with_context(|| format!("creating session to {destination}"))?;
     session.set_compress(true);
     session.set_blocking(true);
     session.set_timeout(8000); // 8 seconds
     session.set_tcp_stream(
         TcpStream::connect(destination)
-            .with_context(|| format!("connecting to {}", destination))?,
+            .with_context(|| format!("connecting to {destination}"))?,
     );
     session.handshake().context("ssh session handshake")?;
     Ok(session)
@@ -215,7 +215,7 @@ fn authenticate_session(session: &Session, username: &str) -> Result<()> {
     authenticate_pubkey(session, username)
         .or_else(|_| authenticate_agent(session, username))
         .with_context(|| {
-            format!("authentication failed for user {}", username)
+            format!("authentication failed for user {username}")
         })?;
     Ok(())
 }
@@ -249,9 +249,9 @@ fn authenticate_agent(session: &Session, username: &str) -> Result<()> {
 fn mirror_directory(sftp: &Sftp, dir: &Path) -> Result<()> {
     trace!("mirror_directory: {:?}", dir);
     let mut remote = sftp_read_dir(sftp, dir)?;
-    for entry in read_dir(dir).with_context(|| format!("read_dir {:?}", dir))? {
+    for entry in read_dir(dir).with_context(|| format!("read_dir {dir:?}"))? {
         if let Some((path, len)) = path_len(entry) {
-            let pos = remote.iter().position(|p| (*p).0 == path);
+            let pos = remote.iter().position(|p| p.0 == path);
             let rfile = pos.map(|i| remote.swap_remove(i));
             if is_path_valid(&path) && should_mirror(rfile, len) {
                 mirror_file(sftp, &path)?;
@@ -271,7 +271,7 @@ fn mirror_directory(sftp: &Sftp, dir: &Path) -> Result<()> {
 fn sftp_read_dir(sftp: &Sftp, dir: &Path) -> Result<Vec<(PathBuf, FileStat)>> {
     let mut remote = sftp
         .readdir(dir)
-        .with_context(|| format!("sftp readdir {:?}", dir))?;
+        .with_context(|| format!("sftp readdir {dir:?}"))?;
     remote.retain(|path_stat| path_stat.1.is_file());
     Ok(remote)
 }
@@ -344,12 +344,12 @@ fn copy_file(sftp: &Sftp, path: &Path) -> Result<()> {
             mode,
             OpenType::File,
         )
-        .with_context(|| format!("sftp open_mode {:?}", backup))?;
+        .with_context(|| format!("sftp open_mode {backup:?}"))?;
     let copied = {
         let mut src = io::BufReader::with_capacity(CAPACITY, src);
         let mut dst = io::BufWriter::with_capacity(CAPACITY, dst);
         io::copy(&mut src, &mut dst)
-            .with_context(|| format!("sftp copy {:?}", path))?
+            .with_context(|| format!("sftp copy {path:?}"))?
     };
     if copied == len {
         rename_file(sftp, &backup, path)
@@ -375,7 +375,7 @@ fn rename_file(sftp: &Sftp, src: &Path, dst: &Path) -> Result<()> {
             }
         }
     }
-    .with_context(|| format!("sftp rename {:?} {:?}", src, dst))?;
+    .with_context(|| format!("sftp rename {src:?} {dst:?}"))?;
     Ok(())
 }
 
@@ -386,7 +386,7 @@ fn rename_file(sftp: &Sftp, src: &Path, dst: &Path) -> Result<()> {
 fn rm_file(sftp: &Sftp, path: &Path) -> Result<()> {
     trace!("rm_file {:?}", path);
     sftp.unlink(path)
-        .with_context(|| format!("remove failed {:?}", path))?;
+        .with_context(|| format!("remove failed {path:?}"))?;
     info!("removed {:?}", path);
     Ok(())
 }
