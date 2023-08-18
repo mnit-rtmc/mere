@@ -5,7 +5,9 @@
 use anyhow::{anyhow, Context, Result};
 use inotify::{Event, Inotify, WatchDescriptor, WatchMask};
 use log::{debug, info, trace};
-use ssh2::{FileStat, OpenFlags, OpenType, RenameFlags, Session, Sftp};
+use ssh2::{
+    ErrorCode, FileStat, OpenFlags, OpenType, RenameFlags, Session, Sftp,
+};
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 use std::fs::{read_dir, DirEntry, File};
@@ -372,9 +374,12 @@ fn rename_file(sftp: &Sftp, src: &Path, dst: &Path) -> Result<()> {
         Ok(()) => Ok(()),
         Err(e) => {
             debug!("rename_file {dst:?} err: {} {}", e.code(), e.message());
-            // An SFTP protocol error (-4 or -31) might happen on rename if the
+            // An SFTP protocol error (4, 11 or 31) might happen on rename if the
             // destination file exists.  In this case, remove it and try again.
-            if e.code() == -4 || e.code() == -11 || e.code() == -31 {
+            if e.code() == ErrorCode::SFTP(4)
+                || e.code() == ErrorCode::SFTP(11)
+                || e.code() == ErrorCode::SFTP(31)
+            {
                 rm_file(sftp, dst)?;
                 sftp.rename(src, dst, rename_flags())?;
                 Ok(())
