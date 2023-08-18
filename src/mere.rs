@@ -345,12 +345,12 @@ fn copy_file(sftp: &Sftp, path: &Path) -> Result<()> {
             OpenType::File,
         )
         .with_context(|| format!("sftp open_mode {backup:?}"))?;
-    let copied = {
-        let mut src = io::BufReader::with_capacity(CAPACITY, src);
-        let mut dst = io::BufWriter::with_capacity(CAPACITY, dst);
-        io::copy(&mut src, &mut dst)
-            .with_context(|| format!("sftp copy {path:?}"))?
-    };
+    let mut src = io::BufReader::with_capacity(CAPACITY, src);
+    let mut dst = io::BufWriter::with_capacity(CAPACITY, dst);
+    let copied = io::copy(&mut src, &mut dst)
+        .with_context(|| format!("sftp copy {path:?}"))?;
+    // remote sftp file must be "closed" before renaming
+    drop(dst);
     if copied == len {
         rename_file(sftp, &backup, path)
     } else {
