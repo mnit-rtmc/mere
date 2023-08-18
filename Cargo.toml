@@ -1,6 +1,6 @@
 [package]
 name = "mere"
-version = "0.3.4"
+version = "0.3.5"
 description = "A real-time file mirroring tool"
 license = "MIT OR Apache-2.0"
 homepage = "https://github.com/mnit-rtmc/mere"
@@ -19,7 +19,8 @@ version = "0.10"
 default_features = false
 
 [dependencies.ssh2]
-version = "0.9"
+# With 0.9, SFTP errors (4) have been observed on rename
+version = "0.8"
 features = ["vendored-openssl"]
 
 [dependencies.env_logger]
