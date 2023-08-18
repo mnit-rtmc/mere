@@ -123,7 +123,7 @@ impl Watcher {
             let events = self
                 .inotify
                 .read_events_blocking(&mut buffer)
-                .context("read_events_blocking")?;
+                .context("inotify.read_events_blocking")?;
             for event in events {
                 if let Some(path) = self.event_path(event) {
                     mirror.add_path(path);
@@ -145,10 +145,13 @@ impl Watcher {
         trace!("check_more_events");
         let mut buffer = [0; 1024];
         let mut more = false;
-        let events = self
-            .inotify
-            .read_events(&mut buffer)
-            .context("read_events")?;
+        let events = match self.inotify.read_events(&mut buffer) {
+            Ok(events) => events,
+            Err(err) if err.kind() == io::ErrorKind::WouldBlock => {
+                return Ok(false)
+            }
+            Err(err) => return Err(err).context("inotify.read_events"),
+        };
         for event in events {
             if let Some(path) = self.event_path(event) {
                 more |= mirror.add_path(path);
