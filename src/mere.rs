@@ -4,7 +4,7 @@
 //
 use anyhow::{anyhow, Context, Result};
 use inotify::{Event, Inotify, WatchDescriptor, WatchMask};
-use log::{debug, info, trace, warn};
+use log::{debug, info, trace};
 use ssh2::{FileStat, OpenFlags, OpenType, RenameFlags, Session, Sftp};
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
@@ -49,28 +49,28 @@ impl Mirror {
     /// Create a new mirror.
     ///
     /// * `destination` Destination host and port.
-    pub fn new(destination: &str) -> Result<Self> {
+    pub fn new(destination: &str) -> Self {
         let destination = destination.to_string();
         let paths = HashSet::new();
         let username = whoami::username();
         info!("Mirroring to {} as user {}", destination, username);
-        Ok(Mirror {
+        Mirror {
             destination,
             paths,
             username,
-        })
+        }
     }
 
     /// Add a path to be mirrored
-    pub fn add_path(&mut self, path: PathBuf) -> Result<bool> {
+    pub fn add_path(&mut self, path: PathBuf) -> bool {
         if is_path_valid(&path) {
             let path = std::fs::canonicalize(&path).unwrap_or(path);
             debug!("adding path: {:?}", path);
             self.paths.insert(path);
-            Ok(true)
+            true
         } else {
             debug!("ignoring path: {:?}", path);
-            Ok(false)
+            false
         }
     }
 
@@ -120,10 +120,13 @@ impl Watcher {
         trace!("wait_events");
         while mirror.paths.is_empty() {
             let mut buffer = [0; 1024];
-            let events = self.inotify.read_events_blocking(&mut buffer)?;
+            let events = self
+                .inotify
+                .read_events_blocking(&mut buffer)
+                .context("read_events_blocking")?;
             for event in events {
                 if let Some(path) = self.event_path(event) {
-                    mirror.add_path(path)?;
+                    mirror.add_path(path);
                 }
             }
         }
@@ -142,10 +145,13 @@ impl Watcher {
         trace!("check_more_events");
         let mut buffer = [0; 1024];
         let mut more = false;
-        let events = self.inotify.read_events(&mut buffer)?;
+        let events = self
+            .inotify
+            .read_events(&mut buffer)
+            .context("read_events")?;
         for event in events {
             if let Some(path) = self.event_path(event) {
-                more |= mirror.add_path(path)?;
+                more |= mirror.add_path(path);
             }
         }
         Ok(more)
@@ -362,10 +368,10 @@ fn rename_file(sftp: &Sftp, src: &Path, dst: &Path) -> Result<()> {
     match sftp.rename(src, dst, rename_flags()) {
         Ok(()) => Ok(()),
         Err(e) => {
-            warn!("rename_file {dst:?} err: {} {}", e.code(), e.message());
+            debug!("rename_file {dst:?} err: {} {}", e.code(), e.message());
             // An SFTP protocol error (-4 or -31) might happen on rename if the
             // destination file exists.  In this case, remove it and try again.
-            if e.code() == -4 || e.code() == -31 {
+            if e.code() == -4 || e.code() == -11 || e.code() == -31 {
                 rm_file(sftp, dst)?;
                 sftp.rename(src, dst, rename_flags())?;
                 Ok(())

@@ -55,9 +55,9 @@ fn socket_addr(dest: &str) -> anyhow::Result<String> {
 
 /// Mirror files to another host.
 fn mirror_files(watch: bool, dest: &str, paths: &[String]) -> Result<()> {
-    let mut mirror = Mirror::new(dest)?;
+    let mut mirror = Mirror::new(dest);
     for path in paths {
-        mirror.add_path(path.into())?;
+        mirror.add_path(path.into());
     }
     if watch {
         let mut watcher = Watcher::new(&mirror)?;
