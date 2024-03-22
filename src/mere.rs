@@ -1,6 +1,6 @@
 // mere.rs    Directory mirroring service
 //
-// Copyright (C) 2018-2023  Minnesota Department of Transportation
+// Copyright (C) 2018-2024  Minnesota Department of Transportation
 //
 use anyhow::{anyhow, Context, Result};
 use inotify::{Event, Inotify, WatchDescriptor, WatchMask};
@@ -105,12 +105,13 @@ impl Mirror {
 impl Watcher {
     /// Create a new watcher.
     pub fn new(mirror: &Mirror) -> Result<Self> {
-        let mut inotify = Inotify::init()?;
+        let inotify = Inotify::init()?;
         let mask = watch_mask();
         let mut watches = HashMap::new();
         for path in &mirror.paths {
             let wd = inotify
-                .add_watch(path, mask)
+                .watches()
+                .add(path, mask)
                 .with_context(|| format!("Could not add watch {path:?}"))?;
             watches.insert(wd, path.clone());
         }
