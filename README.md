@@ -16,17 +16,20 @@ Authentication happens using one of two methods:
 
 ## Building
 
-First, install Perl modules: FindBin and File/Compare (required for OpenSSL)
+First, install Perl modules required for OpenSSL:
+- FindBin
+- File/Compare
+- IPC-Cmd
 
 With `cargo`:
 
-```
+```bash
 cargo build --release
 ```
 
 ## Running
 
-```
+```text
 Usage: ./target/release/mere [OPTIONS]
 
 A real-time file mirroring tool
@@ -49,7 +52,7 @@ Optional arguments:
 
 As root:
 
-```
+```bash
 cp ./target/release/mere /usr/local/bin/
 cp ./mere.service /etc/systemd/system/
 ```
@@ -57,12 +60,12 @@ cp ./mere.service /etc/systemd/system/
 * Edit `/etc/systemd/system/mere.service`
 * Replace {destination} and {path} on `ExecStart=/usr/local/bin/mere` line
 
-```
+```bash
 systemctl enable mere
 systemctl start mere
 ```
 
 Check status with:
-```
+```bash
 systemctl status mere
 ```
