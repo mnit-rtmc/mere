@@ -30,7 +30,7 @@ cargo build --release
 ## Running
 
 ```text
-Usage: ./target/release/mere [OPTIONS]
+Usage: ./target/x86_64-unknown-linux-musl/release/mere [OPTIONS]
 
 A real-time file mirroring tool
 
@@ -53,7 +53,7 @@ Optional arguments:
 As root:
 
 ```bash
-cp ./target/release/mere /usr/local/bin/
+cp ./target/x86_64-unknown-linux-musl/release/mere /usr/local/bin/
 cp ./mere.service /etc/systemd/system/
 ```
 
