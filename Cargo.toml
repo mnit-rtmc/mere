@@ -1,6 +1,6 @@
 [package]
 name = "mere"
-version = "0.3.10"
+version = "0.3.11"
 description = "A real-time file mirroring tool"
 license = "MIT OR Apache-2.0"
 homepage = "https://github.com/mnit-rtmc/mere"
