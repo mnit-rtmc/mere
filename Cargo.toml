@@ -15,7 +15,7 @@ log = "0.4"
 whoami = "1"
 
 [dependencies.inotify]
-version = "0.10"
+version = "0.11"
 default-features = false
 
 [dependencies.ssh2]
