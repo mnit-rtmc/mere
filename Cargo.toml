@@ -6,7 +6,7 @@ license = "MIT OR Apache-2.0"
 homepage = "https://github.com/mnit-rtmc/mere"
 repository = "https://github.com/mnit-rtmc/mere"
 readme = "README.md"
-edition = "2021"
+edition = "2024"
 
 [dependencies]
 anyhow = "1.0"

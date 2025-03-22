@@ -1,8 +1,8 @@
 // mere.rs    Directory mirroring service
 //
-// Copyright (C) 2018-2024  Minnesota Department of Transportation
+// Copyright (C) 2018-2025  Minnesota Department of Transportation
 //
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use inotify::{Event, Inotify, WatchDescriptor, WatchMask};
 use log::{debug, info, trace};
 use ssh2::{
@@ -10,7 +10,7 @@ use ssh2::{
 };
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
-use std::fs::{read_dir, DirEntry, File};
+use std::fs::{DirEntry, File, read_dir};
 use std::io;
 use std::net::TcpStream;
 use std::os::unix::fs::PermissionsExt;
@@ -151,7 +151,7 @@ impl Watcher {
         let events = match self.inotify.read_events(&mut buffer) {
             Ok(events) => events,
             Err(err) if err.kind() == io::ErrorKind::WouldBlock => {
-                return Ok(false)
+                return Ok(false);
             }
             Err(err) => return Err(err).context("inotify.read_events"),
         };
