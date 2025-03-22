@@ -1,6 +1,6 @@
 // main.rs    Directory mirroring service
 //
-// Copyright (C)  2018-2023  Minnesota Department of Transportation
+// Copyright (C)  2018-2025  Minnesota Department of Transportation
 //
 #![forbid(unsafe_code)]
 
@@ -8,38 +8,36 @@ mod mere;
 
 use crate::mere::{Mirror, Watcher};
 use anyhow::{Context, Result};
-use gumdrop::Options;
+use argh::FromArgs;
 use std::env;
 use std::net::ToSocketAddrs;
 
 /// Mere version from cargo manifest
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// A real-time file mirroring tool
-#[derive(Debug, Options)]
-struct MereOptions {
-    /// Print help message
-    help: bool,
-
-    /// Destination: <host> or <host>:<port>
-    #[options(required, short = "d")]
+/// Command-line arguments
+#[derive(Debug, FromArgs)]
+struct Args {
+    /// destination <host> or <host>:<port>
+    #[argh(option, short = 'd')]
     destination: String,
 
-    /// Directory or file path (can be used multiple times)
-    #[options(required, short = "p")]
+    /// directory or file path (can be used multiple times)
+    #[argh(option, short = 'p')]
     path: Vec<String>,
 
-    /// Watch paths for changes using inotify
+    /// watch paths for changes using inotify
+    #[argh(switch, short = 'w')]
     watch: bool,
 }
 
 /// Main function
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("mere v{VERSION}");
-    let opts = MereOptions::parse_args_default_or_exit();
     env_logger::builder().format_timestamp(None).init();
-    let dest = socket_addr(&opts.destination)?;
-    Ok(mirror_files(opts.watch, &dest, &opts.path)?)
+    println!("mere v{VERSION}");
+    let args: Args = argh::from_env();
+    let dest = socket_addr(&args.destination)?;
+    Ok(mirror_files(args.watch, &dest, &args.path)?)
 }
 
 /// Validate destination host to parse as socket address
