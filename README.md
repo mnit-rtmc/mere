@@ -20,6 +20,7 @@ First, install Perl modules required for OpenSSL:
 - FindBin
 - File/Compare
 - IPC-Cmd
+- Time-Piece
 
 With `cargo`:
 
