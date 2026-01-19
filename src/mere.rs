@@ -1,6 +1,6 @@
 // mere.rs    Directory mirroring service
 //
-// Copyright (C) 2018-2025  Minnesota Department of Transportation
+// Copyright (C) 2018-2026  Minnesota Department of Transportation
 //
 use anyhow::{Context, Result, anyhow};
 use inotify::{Event, Inotify, WatchDescriptor, WatchMask};
@@ -187,9 +187,9 @@ const VIM_TEMP: &str = "4913";
 
 /// Check whether a file path is hidden
 fn is_path_hidden(path: &Path) -> bool {
-    path.file_name().map_or(true, |n| {
+    path.file_name().is_none_or(|n| {
         n.to_str()
-            .map_or(true, |sn| sn.starts_with('.') || sn == VIM_TEMP)
+            .is_none_or(|sn| sn.starts_with('.') || sn == VIM_TEMP)
     })
 }
 
@@ -288,12 +288,11 @@ fn sftp_read_dir(sftp: &Sftp, dir: &Path) -> Result<Vec<(PathBuf, FileStat)>> {
 
 /// Get the path and length of a directory entry file
 fn path_len(entry: std::io::Result<DirEntry>) -> Option<(PathBuf, u64)> {
-    if let Ok(entry) = entry {
-        if let Ok(metadata) = entry.metadata() {
-            if metadata.is_file() {
-                return Some((entry.path(), metadata.len()));
-            }
-        }
+    if let Ok(entry) = entry
+        && let Ok(metadata) = entry.metadata()
+        && metadata.is_file()
+    {
+        return Some((entry.path(), metadata.len()));
     }
     None
 }
