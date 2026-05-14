@@ -29,6 +29,8 @@ pub struct Mirror {
     paths: HashSet<PathBuf>,
     /// User name
     username: String,
+    /// Key file
+    key_file: String,
 }
 
 /// Watcher for mirroring
@@ -51,8 +53,7 @@ impl Mirror {
     /// Create a new mirror.
     ///
     /// * `destination` Destination host and port.
-    pub fn new(destination: &str) -> Self {
-        let destination = destination.to_string();
+    pub fn new(destination: String, key_file: String) -> Self {
         let paths = HashSet::new();
         let username = whoami::username().expect("Unable to determine user");
         info!("Mirroring to {destination} as user {username}");
@@ -60,6 +61,7 @@ impl Mirror {
             destination,
             paths,
             username,
+            key_file,
         }
     }
 
@@ -84,7 +86,7 @@ impl Mirror {
             return Ok(());
         }
         let session = create_session(&self.destination)?;
-        authenticate_session(&session, &self.username)?;
+        authenticate_session(&session, &self.username, &self.key_file)?;
         let sftp = session.sftp().context("creating sftp")?;
         for path in self.paths.drain() {
             match std::fs::metadata(&path) {
@@ -218,15 +220,17 @@ fn create_session(destination: &str) -> Result<Session> {
 ///
 /// * `session` SSH session.
 /// * `username` User to authenticate.
-fn authenticate_session(session: &Session, username: &str) -> Result<()> {
+/// * `key_file` Key file
+fn authenticate_session(
+    session: &Session,
+    username: &str,
+    key_file: &str,
+) -> Result<()> {
     trace!("authenticate_session {username}");
-    // First, try using key with no pass-phrase.  If that doesn't work,
-    // try using agent auth -- maybe we're running interactively
-    authenticate_pubkey(session, username)
-        .or_else(|_| authenticate_agent(session, username))
-        .with_context(|| {
-            format!("authentication failed for user {username}")
-        })?;
+    // First, try try using agent auth -- maybe we're running interactively --
+    // If that doesn't work, using key with no pass-phrase.
+    authenticate_agent(session, username)
+        .or_else(|_| authenticate_pubkey(session, username, key_file))?;
     Ok(())
 }
 
@@ -234,13 +238,20 @@ fn authenticate_session(session: &Session, username: &str) -> Result<()> {
 ///
 /// * `session` SSH session.
 /// * `username` User to authenticate.
-fn authenticate_pubkey(session: &Session, username: &str) -> Result<()> {
-    let mut key_file = PathBuf::new();
-    key_file.push("/home");
-    key_file.push(username);
-    key_file.push(".ssh");
-    key_file.push("id_rsa");
-    session.userauth_pubkey_file(username, None, &key_file, None)?;
+/// * `key_file` Key file.
+fn authenticate_pubkey(
+    session: &Session,
+    username: &str,
+    key_file: &str,
+) -> Result<()> {
+    let mut path = PathBuf::new();
+    path.push("/home");
+    path.push(username);
+    path.push(".ssh");
+    path.push(key_file);
+    session
+        .userauth_pubkey_file(username, None, &path, None)
+        .context("pubkey authentication")?;
     debug!("authenticated {username} using pubkey");
     Ok(())
 }
@@ -250,7 +261,9 @@ fn authenticate_pubkey(session: &Session, username: &str) -> Result<()> {
 /// * `session` SSH session.
 /// * `username` User to authenticate.
 fn authenticate_agent(session: &Session, username: &str) -> Result<()> {
-    session.userauth_agent(username)?;
+    session
+        .userauth_agent(username)
+        .context("agent authentication")?;
     debug!("authenticated {username} using agent");
     Ok(())
 }

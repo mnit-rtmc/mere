@@ -26,18 +26,34 @@ struct Args {
     #[argh(option, short = 'p')]
     path: Vec<String>,
 
+    /// key file (default `id_rsa`)
+    #[argh(option, short = 'k', default = "String::from(\"id_rsa\")")]
+    key_file: String,
+
     /// watch paths for changes using inotify
     #[argh(switch, short = 'w')]
     watch: bool,
 }
 
-/// Main function
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    env_logger::builder().format_timestamp(None).init();
-    println!("mere v{VERSION}");
-    let args: Args = argh::from_env();
-    let dest = socket_addr(&args.destination)?;
-    Ok(mirror_files(args.watch, &dest, &args.path)?)
+impl Args {
+    /// Mirror files to another host
+    fn mirror_files(self) -> Result<()> {
+        let dest = socket_addr(&self.destination)?;
+        let mut mirror = Mirror::new(dest, self.key_file);
+        for path in self.path {
+            mirror.add_path(path.into());
+        }
+        if self.watch {
+            let mut watcher = Watcher::new(&mirror)?;
+            mirror.copy_all()?;
+            loop {
+                watcher.wait_events(&mut mirror)?;
+                mirror.copy_all()?;
+            }
+        } else {
+            mirror.copy_all()
+        }
+    }
 }
 
 /// Validate destination host to parse as socket address
@@ -51,20 +67,10 @@ fn socket_addr(dest: &str) -> anyhow::Result<String> {
     Ok(addr)
 }
 
-/// Mirror files to another host.
-fn mirror_files(watch: bool, dest: &str, paths: &[String]) -> Result<()> {
-    let mut mirror = Mirror::new(dest);
-    for path in paths {
-        mirror.add_path(path.into());
-    }
-    if watch {
-        let mut watcher = Watcher::new(&mirror)?;
-        mirror.copy_all()?;
-        loop {
-            watcher.wait_events(&mut mirror)?;
-            mirror.copy_all()?;
-        }
-    } else {
-        mirror.copy_all()
-    }
+/// Main function
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    env_logger::builder().format_timestamp(None).init();
+    println!("mere v{VERSION}");
+    let args: Args = argh::from_env();
+    Ok(args.mirror_files()?)
 }
