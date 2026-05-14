@@ -55,7 +55,7 @@ impl Mirror {
         let destination = destination.to_string();
         let paths = HashSet::new();
         let username = whoami::username().expect("Unable to determine user");
-        info!("Mirroring to {} as user {}", destination, username);
+        info!("Mirroring to {destination} as user {username}");
         Mirror {
             destination,
             paths,
@@ -67,11 +67,11 @@ impl Mirror {
     pub fn add_path(&mut self, path: PathBuf) -> bool {
         if is_path_valid(&path) {
             let path = std::fs::canonicalize(&path).unwrap_or(path);
-            debug!("adding path: {:?}", path);
+            debug!("adding path: {path:?}");
             self.paths.insert(path);
             true
         } else {
-            debug!("ignoring path: {:?}", path);
+            debug!("ignoring path: {path:?}");
             false
         }
     }
@@ -165,14 +165,14 @@ impl Watcher {
 
     /// Get path from an inotify event
     fn event_path(&self, event: Event<&OsStr>) -> Option<PathBuf> {
-        trace!("event_path: {:?}", event);
+        trace!("event_path: {event:?}");
         let path = self.watches.get(&event.wd);
         if let (Some(path), Some(name)) = (path, event.name) {
             let mut path = path.clone();
             path.push(name);
             return Some(path);
         }
-        debug!("ignored event: {:?}", event);
+        debug!("ignored event: {event:?}");
         None
     }
 }
@@ -200,7 +200,7 @@ fn is_path_backup(path: &Path) -> bool {
 
 /// Create a new SSH session
 fn create_session(destination: &str) -> Result<Session> {
-    trace!("create_session {}", destination);
+    trace!("create_session {destination}");
     let mut session = Session::new()
         .with_context(|| format!("creating session to {destination}"))?;
     session.set_compress(true);
@@ -219,7 +219,7 @@ fn create_session(destination: &str) -> Result<Session> {
 /// * `session` SSH session.
 /// * `username` User to authenticate.
 fn authenticate_session(session: &Session, username: &str) -> Result<()> {
-    trace!("authenticate_session {}", username);
+    trace!("authenticate_session {username}");
     // First, try using key with no pass-phrase.  If that doesn't work,
     // try using agent auth -- maybe we're running interactively
     authenticate_pubkey(session, username)
@@ -241,7 +241,7 @@ fn authenticate_pubkey(session: &Session, username: &str) -> Result<()> {
     key_file.push(".ssh");
     key_file.push("id_rsa");
     session.userauth_pubkey_file(username, None, &key_file, None)?;
-    debug!("authenticated {} using pubkey", username);
+    debug!("authenticated {username} using pubkey");
     Ok(())
 }
 
@@ -251,13 +251,13 @@ fn authenticate_pubkey(session: &Session, username: &str) -> Result<()> {
 /// * `username` User to authenticate.
 fn authenticate_agent(session: &Session, username: &str) -> Result<()> {
     session.userauth_agent(username)?;
-    debug!("authenticated {} using agent", username);
+    debug!("authenticated {username} using agent");
     Ok(())
 }
 
 /// Mirror one directory to destination host
 fn mirror_directory(sftp: &Sftp, dir: &Path) -> Result<()> {
-    trace!("mirror_directory: {:?}", dir);
+    trace!("mirror_directory: {dir:?}");
     let mut remote = sftp_read_dir(sftp, dir)?;
     for entry in read_dir(dir).with_context(|| format!("read_dir {dir:?}"))? {
         if let Some((path, len)) = path_len(entry) {
@@ -313,7 +313,7 @@ fn should_mirror(rfile: Option<(PathBuf, FileStat)>, len: u64) -> bool {
 fn mirror_file(sftp: &Sftp, path: &Path) -> Result<()> {
     let t = Instant::now();
     copy_file(sftp, path)?;
-    info!("copied {:?} in {:?}", path, t.elapsed());
+    info!("copied {path:?} in {:?}", t.elapsed());
     Ok(())
 }
 
@@ -339,7 +339,7 @@ fn rename_flags() -> Option<RenameFlags> {
 /// * `sftp` Sftp instance.
 /// * `path` Path to file.
 fn copy_file(sftp: &Sftp, path: &Path) -> Result<()> {
-    trace!("copy_file {:?}", path);
+    trace!("copy_file {path:?}");
     let backup = backup_file(path);
     let src = File::open(path)?;
     let metadata = src.metadata()?;
@@ -369,7 +369,7 @@ fn copy_file(sftp: &Sftp, path: &Path) -> Result<()> {
 
 /// Rename a remote sftp file
 fn rename_file(sftp: &Sftp, src: &Path, dst: &Path) -> Result<()> {
-    trace!("rename_file {:?} {:?}", src, dst);
+    trace!("rename_file {src:?} {dst:?}");
     match sftp.rename(src, dst, rename_flags()) {
         Ok(()) => Ok(()),
         Err(e) => {
@@ -397,9 +397,9 @@ fn rename_file(sftp: &Sftp, src: &Path, dst: &Path) -> Result<()> {
 /// * `sftp` Sftp instance.
 /// * `path` Path to file.
 fn rm_file(sftp: &Sftp, path: &Path) -> Result<()> {
-    trace!("rm_file {:?}", path);
+    trace!("rm_file {path:?}");
     sftp.unlink(path)
         .with_context(|| format!("remove failed {path:?}"))?;
-    info!("removed {:?}", path);
+    info!("removed {path:?}");
     Ok(())
 }
