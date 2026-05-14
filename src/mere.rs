@@ -54,7 +54,7 @@ impl Mirror {
     pub fn new(destination: &str) -> Self {
         let destination = destination.to_string();
         let paths = HashSet::new();
-        let username = whoami::username();
+        let username = whoami::username().expect("Unable to determine user");
         info!("Mirroring to {} as user {}", destination, username);
         Mirror {
             destination,

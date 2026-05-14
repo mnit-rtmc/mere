@@ -12,7 +12,7 @@ edition = "2024"
 anyhow = "1.0"
 argh = "0.1"
 log = "0.4"
-whoami = "1"
+whoami = "2.1"
 
 [dependencies.inotify]
 version = "0.11"
