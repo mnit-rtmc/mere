@@ -227,8 +227,8 @@ fn authenticate_session(
     key_file: &str,
 ) -> Result<()> {
     trace!("authenticate_session {username}");
-    // First, try try using agent auth -- maybe we're running interactively --
-    // If that doesn't work, using key with no pass-phrase.
+    // First, try using agent auth -- maybe we're running interactively --
+    // If that doesn't work, try using key with no pass-phrase.
     authenticate_agent(session, username)
         .or_else(|_| authenticate_pubkey(session, username, key_file))?;
     Ok(())
